@@ -1,0 +1,1527 @@
+import React, { useState, useEffect, useRef, useCallback } from 'react';
+import { AppSettings, ClubProfile, Match, Player } from './types/basketball';
+
+import { Navbar } from './components/Navbar';
+import { HomePage } from './components/HomePage';
+import { LiveMatch } from './components/LiveMatch';
+import { RosterManagement } from './components/RosterManagement';
+import { MatchHistory } from './components/MatchHistory';
+import { NewMatchModal } from './components/NewMatchModal';
+import { SettingsModal } from './components/SettingsModal';
+import { FinishMatchModal } from './components/FinishMatchModal';
+import { OfflineIndicator } from './components/OfflineIndicator';
+import { ShareLinkModal } from './components/ShareLinkModal';
+import { CoachPinModal } from './components/CoachPinModal';
+import { ClubProfileModal } from './components/ClubProfileModal';
+import { LegalLicensesModal } from './components/LegalLicensesModal';
+import { ParentView } from './components/ParentView';
+import { TeamExportImportModal } from './components/TeamExportImportModal';
+import { VirtualLiveMatchCustomizer } from './components/VirtualLiveMatchCustomizer';
+import { DataTransferModal } from './components/DataTransferModal';
+import { RoomLobby } from './components/RoomLobby';
+import {
+  initDatabase,
+  getPlayers,
+  savePlayer,
+  deletePlayer,
+  getMatches,
+  saveMatch,
+  saveMatchesBulk,
+  deleteMatch,
+  getActiveMatch,
+  getSettings,
+  saveSettings,
+  getClubProfile,
+  saveClubProfile,
+  resetToClubPreset,
+  DEFAULT_CLUB_PROFILE,
+  setCurrentRoomId,
+  saveRecentRoom,
+  replacePlayersInRoom,
+} from './services/db';
+import {
+  authenticateRoomCoach,
+  clearStoredCoachToken,
+  fetchRoomState,
+  getLocalDeletedMatchIds,
+  addLocalDeletedMatchIds,
+  getStoredCoachToken,
+  parseRoomFromUrl,
+  pushRoomStateDebounced,
+  pushRoomStateImmediate,
+  ServerSyncData,
+  setStoredCoachToken,
+  subscribeToRoomUpdates,
+  WsConnectionStatus,
+} from './services/syncService';
+import {
+  Trophy,
+  Users,
+  PlusCircle,
+  ArrowRight,
+  ShieldCheck,
+  RefreshCw,
+} from 'lucide-react';
+import { playClickSound, triggerHaptic } from './services/tts';
+
+function buildActiveMatchFingerprint(m: Match | undefined): string {
+  if (!m) return 'none';
+  return `${m.id}:${m.updatedAt || 0}:${m.clockSeconds}:${m.isClockRunning}:${m.currentQuarter}:${m.ourScore}:${m.opponentScore}:${m.events?.length || 0}:${m.onCourtPlayerIds?.join(',') || ''}`;
+}
+
+export default function App() {
+  const initialUrlRef = useRef(parseRoomFromUrl());
+
+  const [roomId, setRoomId] = useState<string | null>(() => {
+    const rid = initialUrlRef.current.roomId;
+    setCurrentRoomId(rid);
+    return rid;
+  });
+
+  const [coachToken, setCoachToken] = useState<string | null>(() => {
+    const rid = initialUrlRef.current.roomId;
+    if (!rid) return null;
+    return initialUrlRef.current.coachTokenFromUrl || getStoredCoachToken(rid);
+  });
+
+  const [isReadOnlyViewer, setIsReadOnlyViewer] = useState<boolean>(() => {
+    const rid = initialUrlRef.current.roomId;
+    if (!rid) return true;
+    const urlParams = typeof window !== 'undefined' ? new URLSearchParams(window.location.search) : null;
+    const explicitSpectator =
+      urlParams?.get('view') === 'spectator' ||
+      urlParams?.get('mode') === 'view' ||
+      urlParams?.get('role') === 'viewer' ||
+      urlParams?.get('podglad') === '1';
+    if (explicitSpectator) return true;
+    const token = initialUrlRef.current.coachTokenFromUrl || getStoredCoachToken(rid);
+    return !token;
+  });
+
+  const [lobbyParentMode, setLobbyParentMode] = useState(false);
+  const [roomLoadError, setRoomLoadError] = useState<string | null>(null);
+  const [justCreatedRoom, setJustCreatedRoom] = useState(false);
+  const [wsStatus, setWsStatus] = useState<WsConnectionStatus>('disconnected');
+
+  const [currentTab, setCurrentTab] = useState<'home' | 'live' | 'roster' | 'history' | 'parent'>(() => {
+    if (typeof window !== 'undefined') {
+      const urlParams = new URLSearchParams(window.location.search);
+      const tabParam = urlParams.get('tab');
+      const viewParam = urlParams.get('view');
+      const modeParam = urlParams.get('mode');
+      if (tabParam === 'live' || viewParam === 'spectator' || modeParam === 'view' || urlParams.get('podglad') === '1') {
+        return 'live';
+      }
+    }
+    return 'home';
+  });
+
+  const [players, setPlayers] = useState<Player[]>([]);
+  const [matches, setMatches] = useState<Match[]>([]);
+  const [activeMatch, setActiveMatch] = useState<Match | undefined>(undefined);
+  const activeMatchRef = useRef<Match | undefined>(undefined);
+
+  const [isShareModalOpen, setIsShareModalOpen] = useState(false);
+  const [isCoachPinOpen, setIsCoachPinOpen] = useState(false);
+  const [isTransferModalOpen, setIsTransferModalOpen] = useState(false);
+  const [isTeamExportImportOpen, setIsTeamExportImportOpen] = useState(false);
+  const [teamExportImportTab, setTeamExportImportTab] = useState<'export' | 'import'>('export');
+  const [isLiveCustomizerOpen, setIsLiveCustomizerOpen] = useState(false);
+
+  const [clubProfile, setClubProfile] = useState<ClubProfile>(DEFAULT_CLUB_PROFILE);
+  const [isClubProfileOpen, setIsClubProfileOpen] = useState(false);
+  const [isLegalModalOpen, setIsLegalModalOpen] = useState(false);
+  const [isFinishModalOpen, setIsFinishModalOpen] = useState(false);
+  const [settings, setSettings] = useState<AppSettings>({
+    ttsEnabled: true,
+    soundEffects: true,
+    handMode: 'right',
+    autoAdvanceQuarter: false,
+    defaultQuarterMinutes: 8,
+    announcerVoice: 'Puck',
+    coachPin: '1234',
+  });
+
+  const [isNewMatchOpen, setIsNewMatchOpen] = useState(false);
+  const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+  const [isLoading, setIsLoading] = useState<boolean>(() => Boolean(initialUrlRef.current.roomId));
+
+  const lastLocalWriteAtRef = useRef<number>(0);
+  const syncFingerprintsRef = useRef({
+    club: '',
+    players: '',
+    matches: '',
+    activeMatch: '',
+  });
+
+  useEffect(() => {
+    activeMatchRef.current = activeMatch;
+  }, [activeMatch]);
+
+  const handleOpenTeamExportImport = (tab: 'export' | 'import' = 'export') => {
+    setTeamExportImportTab(tab);
+    setIsTeamExportImportOpen(true);
+  };
+
+  // Update browser URL cleanly
+  const updateUrlForRoom = (rid: string | null, replace = false) => {
+    if (typeof window === 'undefined') return;
+    const nextUrl = rid ? `/?room=${encodeURIComponent(rid)}` : '/';
+    if (replace) {
+      window.history.replaceState({}, '', nextUrl);
+    } else {
+      window.history.pushState({}, '', nextUrl);
+    }
+  };
+
+  // Enter a specific room from RoomLobby or deep-link
+  const handleEnterRoom = useCallback(
+    (nextRoomId: string, nextCoachToken: string | null, justCreated = false) => {
+      const normalizedRoomId = nextRoomId.trim().toLowerCase();
+      setRoomLoadError(null);
+      setLobbyParentMode(false);
+      setCurrentRoomId(normalizedRoomId);
+      syncFingerprintsRef.current = { club: '', players: '', matches: '', activeMatch: '' };
+
+      if (nextCoachToken) {
+        setStoredCoachToken(normalizedRoomId, nextCoachToken);
+        setCoachToken(nextCoachToken);
+        setIsReadOnlyViewer(false);
+      } else {
+        clearStoredCoachToken(normalizedRoomId);
+        setCoachToken(null);
+        setIsReadOnlyViewer(true);
+      }
+
+      setJustCreatedRoom(justCreated);
+      setCurrentTab('home');
+      setIsLoading(true);
+      setRoomId(normalizedRoomId);
+      updateUrlForRoom(normalizedRoomId, false);
+    },
+    []
+  );
+
+  // Return to Room Lobby
+  const handleExitRoom = useCallback(() => {
+    playClickSound();
+    triggerHaptic(25);
+    setCurrentRoomId(null);
+    setRoomId(null);
+    setCoachToken(null);
+    setIsReadOnlyViewer(true);
+    setActiveMatch(undefined);
+    activeMatchRef.current = undefined;
+    setPlayers([]);
+    setMatches([]);
+    setClubProfile(DEFAULT_CLUB_PROFILE);
+    setJustCreatedRoom(false);
+    setIsShareModalOpen(false);
+    setLobbyParentMode(false);
+    setRoomLoadError(null);
+    syncFingerprintsRef.current = { club: '', players: '', matches: '', activeMatch: '' };
+    updateUrlForRoom(null, false);
+  }, []);
+
+  // Listen to browser Back/Forward navigation
+  useEffect(() => {
+    const handlePopState = () => {
+      const parsed = parseRoomFromUrl();
+      setCurrentRoomId(parsed.roomId);
+      syncFingerprintsRef.current = { club: '', players: '', matches: '', activeMatch: '' };
+
+      if (!parsed.roomId) {
+        setRoomId(null);
+        setCoachToken(null);
+        setIsReadOnlyViewer(true);
+        setActiveMatch(undefined);
+        activeMatchRef.current = undefined;
+        setPlayers([]);
+        setMatches([]);
+        setIsLoading(false);
+        return;
+      }
+
+      const token = parsed.coachTokenFromUrl || getStoredCoachToken(parsed.roomId);
+      setRoomId(parsed.roomId);
+      setCoachToken(token);
+      setIsReadOnlyViewer(!token);
+      setIsLoading(true);
+    };
+
+    window.addEventListener('popstate', handlePopState);
+    return () => window.removeEventListener('popstate', handlePopState);
+  }, []);
+
+  // Helper: Apply incoming room state (from WebSocket or REST poll)
+  const applyServerRoomState = useCallback(
+    (serverData: ServerSyncData, allowForCoach = false) => {
+      if (!serverData || (serverData.roomId && serverData.roomId !== roomId)) return;
+
+      // Avoid echoing back our own local write immediately while clock/action is ticking
+      if (!isReadOnlyViewer && !allowForCoach) {
+        if (Date.now() - lastLocalWriteAtRef.current < 1500) {
+          return;
+        }
+      }
+
+      // 1. Club profile
+      if (serverData.clubProfile) {
+        const clubJson = JSON.stringify(serverData.clubProfile);
+        if (clubJson !== syncFingerprintsRef.current.club) {
+          syncFingerprintsRef.current.club = clubJson;
+          setClubProfile(serverData.clubProfile);
+          saveClubProfile(serverData.clubProfile).catch(() => {});
+        }
+      }
+
+      // 2. Players
+      if (Array.isArray(serverData.players)) {
+        const playersFp = `${serverData.players.length}:${serverData.players
+          .map((p) => `${p.id}-${p.number}-${p.firstName}-${p.lastName}-${p.photo ? '1' : '0'}`)
+          .join(',')}`;
+        if (playersFp !== syncFingerprintsRef.current.players) {
+          syncFingerprintsRef.current.players = playersFp;
+          setPlayers(serverData.players);
+          replacePlayersInRoom(serverData.players).catch(() => {});
+        }
+      }
+
+      const serverDeletedSet = new Set<string>([
+        ...getLocalDeletedMatchIds(roomId),
+        ...(Array.isArray(serverData.deletedMatchIds) ? serverData.deletedMatchIds : []),
+      ]);
+      if (Array.isArray(serverData.deletedMatchIds) && serverData.deletedMatchIds.length > 0) {
+        addLocalDeletedMatchIds(serverData.deletedMatchIds, roomId);
+      }
+
+      const validServerMatches = Array.isArray(serverData.matches)
+        ? serverData.matches.filter((m) => m && m.id && !serverDeletedSet.has(m.id))
+        : [];
+
+      // 3. Matches list
+      if (Array.isArray(serverData.matches)) {
+        const matchesFp = `${validServerMatches.length}:${validServerMatches
+          .map((m) => `${m.id}-${m.updatedAt || 0}-${m.ourScore}-${m.opponentScore}-${m.status}-${m.events?.length || 0}`)
+          .join(',')}`;
+        if (matchesFp !== syncFingerprintsRef.current.matches) {
+          syncFingerprintsRef.current.matches = matchesFp;
+          setMatches(validServerMatches);
+          if (validServerMatches.length > 0) {
+            saveMatchesBulk(validServerMatches).catch(() => {});
+          }
+        }
+      }
+
+      // 4. Active live match
+      let liveMatch: Match | undefined = undefined;
+      if (serverData.activeMatchId && !serverDeletedSet.has(serverData.activeMatchId)) {
+        liveMatch = validServerMatches.find(
+          (m) => m.id === serverData.activeMatchId && m.status === 'live'
+        );
+      }
+      if (!liveMatch && validServerMatches.length > 0) {
+        liveMatch = validServerMatches.find((m) => m.status === 'live');
+      }
+
+      const activeFp = buildActiveMatchFingerprint(liveMatch);
+      if (activeFp !== syncFingerprintsRef.current.activeMatch) {
+        syncFingerprintsRef.current.activeMatch = activeFp;
+        setActiveMatch(liveMatch);
+        activeMatchRef.current = liveMatch;
+      }
+    },
+    [roomId, isReadOnlyViewer]
+  );
+
+  // Load room data when entering/switching roomId
+  useEffect(() => {
+    if (!roomId) {
+      setIsLoading(false);
+      return;
+    }
+
+    let cancelled = false;
+
+    async function loadRoomData() {
+      setIsLoading(true);
+      setRoomLoadError(null);
+      setCurrentRoomId(roomId);
+
+      try {
+        // Resolve effective coach token (prefer URL token if present in this navigation, then stored)
+        const parsed = parseRoomFromUrl();
+        let effectiveToken =
+          parsed.roomId === roomId && parsed.coachTokenFromUrl
+            ? parsed.coachTokenFromUrl
+            : coachToken || getStoredCoachToken(roomId);
+
+        if (parsed.roomId === roomId && parsed.coachTokenFromUrl) {
+          const authCheck = await authenticateRoomCoach(roomId!, {
+            coachToken: parsed.coachTokenFromUrl,
+          });
+          if (authCheck.authenticated && authCheck.coachToken) {
+            effectiveToken = authCheck.coachToken;
+            setStoredCoachToken(roomId!, effectiveToken);
+            // Strip &coach= from browser address bar so copying URL shares the safe parent link
+            updateUrlForRoom(roomId!, true);
+          } else {
+            effectiveToken = null;
+            clearStoredCoachToken(roomId);
+          }
+        }
+
+        await initDatabase(false);
+
+        const [loadedPlayers, loadedMatches, loadedSettings, liveMatch, roomRes, loadedClub] =
+          await Promise.all([
+            getPlayers(),
+            getMatches(),
+            getSettings(),
+            getActiveMatch(),
+            fetchRoomState(roomId!, effectiveToken),
+            getClubProfile(),
+          ]);
+
+        if (cancelled) return;
+
+        if (roomRes.status === 404) {
+          setCurrentRoomId(null);
+          clearStoredCoachToken(roomId);
+          setRoomId(null);
+          setCoachToken(null);
+          setIsReadOnlyViewer(true);
+          setRoomLoadError(`Nie znaleziono pokoju o kodzie "${roomId}". Sprawdź link lub utwórz nowy pokój.`);
+          updateUrlForRoom(null, true);
+          return;
+        }
+
+        const serverData = roomRes.data;
+        const explicitSpectator =
+          typeof window !== 'undefined' &&
+          (() => {
+            const p = new URLSearchParams(window.location.search);
+            return (
+              p.get('view') === 'spectator' ||
+              p.get('mode') === 'view' ||
+              p.get('role') === 'viewer' ||
+              p.get('podglad') === '1'
+            );
+          })();
+
+        const serverConfirmedCoach = serverData
+          ? Boolean(serverData.isCoachAuthenticated)
+          : Boolean(effectiveToken);
+
+        const isCoachActive = !explicitSpectator && Boolean(effectiveToken) && serverConfirmedCoach;
+
+        if (!serverConfirmedCoach && effectiveToken && serverData) {
+          // Stale or wrong token for this room
+          clearStoredCoachToken(roomId);
+          effectiveToken = null;
+        }
+
+        if (!cancelled) {
+          setCoachToken(isCoachActive ? effectiveToken : null);
+          setIsReadOnlyViewer(!isCoachActive);
+        }
+
+        const mergedDeletedIds = addLocalDeletedMatchIds(
+          Array.isArray(serverData?.deletedMatchIds) ? serverData.deletedMatchIds : [],
+          roomId
+        );
+        const deletedIdsSet = new Set<string>(mergedDeletedIds);
+
+        const cleanLocalMatches: Match[] = [];
+        for (const m of loadedMatches) {
+          if (deletedIdsSet.has(m.id)) {
+            await deleteMatch(m.id).catch(() => {});
+          } else {
+            cleanLocalMatches.push(m);
+          }
+        }
+
+        let finalPlayers = loadedPlayers;
+        let finalMatches = cleanLocalMatches;
+        let finalActiveMatch: Match | undefined =
+          liveMatch && !deletedIdsSet.has(liveMatch.id) && liveMatch.status === 'live'
+            ? liveMatch
+            : undefined;
+        let finalClub = loadedClub;
+
+        if (serverData) {
+          if (serverData.clubProfile) {
+            // Prefer server profile for spectators, or when server has newer update
+            if (!isCoachActive || (serverData.clubProfile.updatedAt || 0) >= (loadedClub.updatedAt || 0)) {
+              finalClub = serverData.clubProfile;
+              await saveClubProfile(finalClub).catch(() => {});
+            }
+          }
+
+          if (Array.isArray(serverData.matches)) {
+            if (!isCoachActive) {
+              finalMatches = serverData.matches
+                .filter((m) => m && m.id && !deletedIdsSet.has(m.id))
+                .sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
+            } else {
+              const mergedMap = new Map<string, Match>();
+              for (const m of cleanLocalMatches) {
+                mergedMap.set(m.id, m);
+              }
+              let hasNewServerMatches = false;
+              for (const sm of serverData.matches) {
+                if (!sm || !sm.id || deletedIdsSet.has(sm.id)) continue;
+                const local = mergedMap.get(sm.id);
+                const smTs = sm.updatedAt || 0;
+                const localTs = local?.updatedAt || 0;
+                if (
+                  !local ||
+                  smTs > localTs ||
+                  (smTs === localTs && sm.status === 'finished' && local.status !== 'finished')
+                ) {
+                  mergedMap.set(sm.id, sm);
+                  hasNewServerMatches = true;
+                }
+              }
+              finalMatches = Array.from(mergedMap.values()).sort(
+                (a, b) => (b.updatedAt || 0) - (a.updatedAt || 0)
+              );
+              if (hasNewServerMatches) {
+                saveMatchesBulk(finalMatches).catch(() => {});
+              }
+            }
+          }
+
+          if (Array.isArray(serverData.players)) {
+            if (!isCoachActive || loadedPlayers.length === 0 || serverData.players.length > 0) {
+              if (!isCoachActive || loadedPlayers.length === 0) {
+                finalPlayers = serverData.players;
+                if (finalPlayers.length > 0) {
+                  await replacePlayersInRoom(finalPlayers).catch(() => {});
+                }
+              }
+            }
+          }
+        }
+
+        // Resolve active live match
+        const serverActiveCandidate =
+          serverData?.activeMatchId && !deletedIdsSet.has(serverData.activeMatchId)
+            ? finalMatches.find((m) => m.id === serverData.activeMatchId && m.status === 'live')
+            : undefined;
+        const localActiveCandidate = finalActiveMatch
+          ? finalMatches.find((m) => m.id === finalActiveMatch!.id && m.status === 'live')
+          : undefined;
+
+        finalActiveMatch = isCoachActive
+          ? serverActiveCandidate || localActiveCandidate || finalMatches.find((m) => m.status === 'live')
+          : serverActiveCandidate || finalMatches.find((m) => m.status === 'live');
+
+        if (!finalActiveMatch && typeof window !== 'undefined') {
+          try {
+            localStorage.removeItem(`basketstats_active_match_id_${roomId}`);
+          } catch {
+            // ignore
+          }
+        }
+
+        // If coach has newer local offline changes, push them to server room
+        if (
+          isCoachActive &&
+          effectiveToken &&
+          (finalPlayers.length > 0 || finalMatches.length > 0 || mergedDeletedIds.length > 0)
+        ) {
+          lastLocalWriteAtRef.current = Date.now();
+          pushRoomStateImmediate(roomId!, effectiveToken, {
+            matches: finalMatches,
+            players: finalPlayers,
+            activeMatchId: finalActiveMatch?.id || null,
+            clubProfile: finalClub,
+            deletedMatchIds: mergedDeletedIds,
+          });
+        }
+
+        // Seed fingerprints
+        syncFingerprintsRef.current = {
+          club: JSON.stringify(finalClub),
+          players: `${finalPlayers.length}:${finalPlayers
+            .map((p) => `${p.id}-${p.number}-${p.firstName}-${p.lastName}-${p.photo ? '1' : '0'}`)
+            .join(',')}`,
+          matches: `${finalMatches.length}:${finalMatches
+            .map((m) => `${m.id}-${m.updatedAt || 0}-${m.ourScore}-${m.opponentScore}-${m.status}-${m.events?.length || 0}`)
+            .join(',')}`,
+          activeMatch: buildActiveMatchFingerprint(finalActiveMatch),
+        };
+
+        const mergedSettings: AppSettings = {
+          ...loadedSettings,
+          coachPin: serverData?.coachPin || loadedSettings.coachPin || '1234',
+        };
+        if (serverData?.coachPin && serverData.coachPin !== loadedSettings.coachPin) {
+          saveSettings(mergedSettings).catch(() => {});
+        }
+
+        setClubProfile(finalClub);
+        setPlayers(finalPlayers);
+        setMatches(finalMatches);
+        setSettings(mergedSettings);
+
+        saveRecentRoom({
+          roomId: roomId!,
+          teamName: finalClub.name || 'Drużyna Koszykarska',
+          shortName: finalClub.shortName || 'DRUŻYNA',
+          city: finalClub.city || '',
+          badgeEmoji: finalClub.badgeEmoji || '🏀',
+          season: finalClub.season || '2026/2027',
+          role: isCoachActive ? 'coach' : 'spectator',
+          coachToken: isCoachActive ? effectiveToken || undefined : undefined,
+          lastVisited: Date.now(),
+        });
+
+        if (finalActiveMatch) {
+          setActiveMatch(finalActiveMatch);
+          activeMatchRef.current = finalActiveMatch;
+          if (!isCoachActive) {
+            setCurrentTab('live');
+          }
+        } else {
+          setActiveMatch(undefined);
+          activeMatchRef.current = undefined;
+        }
+
+        if (justCreatedRoom && isCoachActive) {
+          setIsShareModalOpen(true);
+        }
+      } catch (err) {
+        console.error('Błąd ładowania danych pokoju:', err);
+      } finally {
+        if (!cancelled) {
+          setIsLoading(false);
+        }
+      }
+    }
+
+    loadRoomData();
+    return () => {
+      cancelled = true;
+    };
+  }, [roomId]);
+
+  // Real-time WebSocket subscription for the active room
+  useEffect(() => {
+    if (!roomId) {
+      setWsStatus('disconnected');
+      return;
+    }
+
+    const unsubscribe = subscribeToRoomUpdates(
+      roomId,
+      (incomingState) => {
+        applyServerRoomState(incomingState, false);
+      },
+      setWsStatus
+    );
+
+    return () => {
+      unsubscribe();
+    };
+  }, [roomId, applyServerRoomState]);
+
+  // Fallback REST polling for Spectator mode if WebSocket is reconnecting/unavailable
+  useEffect(() => {
+    if (!roomId || !isReadOnlyViewer) return;
+
+    const pollRoom = async () => {
+      const { status, data } = await fetchRoomState(roomId, null);
+      if (status === 200 && data) {
+        applyServerRoomState(data, true);
+      }
+    };
+
+    const interval = wsStatus === 'connected' ? 15000 : 3000;
+    const timer = setInterval(pollRoom, interval);
+
+    const handleVisibility = () => {
+      if (document.visibilityState === 'visible') {
+        pollRoom();
+      }
+    };
+    document.addEventListener('visibilitychange', handleVisibility);
+
+    return () => {
+      clearInterval(timer);
+      document.removeEventListener('visibilitychange', handleVisibility);
+    };
+  }, [roomId, isReadOnlyViewer, wsStatus, applyServerRoomState]);
+
+  // Same-browser cross-tab BroadcastChannel scoped strictly by roomId
+  useEffect(() => {
+    if (!roomId || typeof window === 'undefined' || !('BroadcastChannel' in window)) return;
+    try {
+      const channel = new BroadcastChannel(`basketstats_room_sync_${roomId}`);
+      channel.onmessage = (event) => {
+        if (event.data?.type === 'MATCH_UPDATED' && event.data.roomId === roomId && event.data.match) {
+          const incoming = event.data.match as Match;
+          setActiveMatch((prev) => {
+            if (!prev || prev.id === incoming.id) {
+              activeMatchRef.current = incoming;
+              return incoming.status === 'live' ? incoming : undefined;
+            }
+            return prev;
+          });
+          setMatches((prev) => {
+            const idx = prev.findIndex((m) => m.id === incoming.id);
+            if (idx >= 0) {
+              const updated = [...prev];
+              updated[idx] = incoming;
+              return updated;
+            }
+            return [incoming, ...prev];
+          });
+        }
+      };
+      return () => {
+        channel.close();
+      };
+    } catch {
+      // ignore
+    }
+  }, [roomId]);
+
+  // Update Match handler
+  const handleUpdateMatch = async (updatedOrUpdater: Match | ((prevMatch: Match) => Match)) => {
+    if (isReadOnlyViewer || !roomId) return;
+    const current = activeMatchRef.current || activeMatch;
+    if (!current) return;
+
+    const rawNext = typeof updatedOrUpdater === 'function' ? updatedOrUpdater(current) : updatedOrUpdater;
+    const nextMatch: Match = {
+      ...rawNext,
+      updatedAt: Date.now(),
+    };
+    activeMatchRef.current = nextMatch;
+    setActiveMatch(nextMatch);
+
+    const updatedMatchesList = matches.some((m) => m.id === nextMatch.id)
+      ? matches.map((m) => (m.id === nextMatch.id ? nextMatch : m))
+      : [nextMatch, ...matches];
+
+    setMatches(updatedMatchesList);
+    lastLocalWriteAtRef.current = Date.now();
+    await saveMatch(nextMatch);
+
+    if (typeof window !== 'undefined' && 'BroadcastChannel' in window) {
+      try {
+        const channel = new BroadcastChannel(`basketstats_room_sync_${roomId}`);
+        channel.postMessage({ type: 'MATCH_UPDATED', roomId, match: nextMatch });
+        channel.close();
+      } catch {
+        // ignore
+      }
+    }
+
+    const isScoreOrEventChange =
+      current.events.length !== nextMatch.events.length ||
+      current.ourScore !== nextMatch.ourScore ||
+      current.opponentScore !== nextMatch.opponentScore ||
+      current.currentQuarter !== nextMatch.currentQuarter;
+
+    if (isScoreOrEventChange) {
+      pushRoomStateImmediate(roomId, coachToken, {
+        matches: updatedMatchesList,
+        players,
+        activeMatchId: nextMatch.status === 'live' ? nextMatch.id : null,
+        clubProfile,
+      });
+    } else {
+      pushRoomStateDebounced(
+        roomId,
+        coachToken,
+        {
+          matches: updatedMatchesList,
+          players,
+          activeMatchId: nextMatch.status === 'live' ? nextMatch.id : null,
+        },
+        500
+      );
+    }
+  };
+
+  // Request Finish Match
+  const handleRequestFinishMatch = () => {
+    if (!activeMatch) return;
+    setIsFinishModalOpen(true);
+  };
+
+  // Confirm Finish Match
+  const handleConfirmFinishMatch = async () => {
+    if (!roomId || isReadOnlyViewer) return;
+    const targetMatch = activeMatchRef.current || activeMatch;
+    if (!targetMatch) return;
+    playClickSound();
+    triggerHaptic(50);
+    const finished: Match = {
+      ...targetMatch,
+      status: 'finished',
+      isClockRunning: false,
+      updatedAt: Date.now(),
+    };
+    activeMatchRef.current = undefined;
+    setActiveMatch(undefined);
+    setIsFinishModalOpen(false);
+    lastLocalWriteAtRef.current = Date.now();
+    await saveMatch(finished);
+    const updatedMatches = matches.some((m) => m.id === finished.id)
+      ? matches.map((m) => (m.id === finished.id ? finished : m))
+      : [finished, ...matches];
+    setMatches(updatedMatches);
+    await pushRoomStateImmediate(roomId, coachToken, {
+      matches: updatedMatches,
+      players,
+      activeMatchId: null,
+      clubProfile,
+      deletedMatchIds: getLocalDeletedMatchIds(roomId),
+    });
+    setCurrentTab('history');
+  };
+
+  // Start new match
+  const handleStartNewMatch = async (newMatch: Match) => {
+    if (!roomId || isReadOnlyViewer) return;
+    playClickSound();
+    triggerHaptic(40);
+    lastLocalWriteAtRef.current = Date.now();
+    await saveMatch(newMatch);
+    setActiveMatch(newMatch);
+    activeMatchRef.current = newMatch;
+    const updatedMatches = [newMatch, ...matches];
+    setMatches(updatedMatches);
+    pushRoomStateImmediate(roomId, coachToken, {
+      matches: updatedMatches,
+      players,
+      activeMatchId: newMatch.id,
+      clubProfile,
+    });
+    setCurrentTab('live');
+  };
+
+  // Resume a match
+  const handleResumeMatch = (matchToResume: Match) => {
+    if (!roomId || isReadOnlyViewer) return;
+    playClickSound();
+    triggerHaptic(30);
+    const liveVersion: Match = {
+      ...matchToResume,
+      status: 'live',
+      updatedAt: Date.now(),
+    };
+    lastLocalWriteAtRef.current = Date.now();
+    saveMatch(liveVersion);
+    setActiveMatch(liveVersion);
+    activeMatchRef.current = liveVersion;
+    const updatedMatches = matches.map((m) => (m.id === liveVersion.id ? liveVersion : m));
+    setMatches(updatedMatches);
+    pushRoomStateImmediate(roomId, coachToken, {
+      matches: updatedMatches,
+      players,
+      activeMatchId: liveVersion.id,
+      clubProfile,
+    });
+    setCurrentTab('live');
+  };
+
+  // Delete match
+  const handleDeleteMatch = async (id: string) => {
+    if (!roomId || isReadOnlyViewer) return;
+    const updatedDeletedIds = addLocalDeletedMatchIds([id], roomId);
+    lastLocalWriteAtRef.current = Date.now();
+    await deleteMatch(id);
+    const updatedMatches = matches.filter((m) => m.id !== id);
+    setMatches(updatedMatches);
+    const isDeletingActive = activeMatch?.id === id || activeMatchRef.current?.id === id;
+    if (isDeletingActive) {
+      activeMatchRef.current = undefined;
+      setActiveMatch(undefined);
+    }
+    const nextActiveId = isDeletingActive ? null : activeMatch?.id || null;
+    await pushRoomStateImmediate(roomId, coachToken, {
+      matches: updatedMatches,
+      players,
+      activeMatchId: nextActiveId,
+      deletedMatchId: id,
+      deletedMatchIds: updatedDeletedIds,
+      clubProfile,
+    });
+  };
+
+  // Data import from transfer modal
+  const handleDataImported = (
+    updatedMatches: Match[],
+    updatedPlayers: Player[],
+    updatedClub?: ClubProfile
+  ) => {
+    lastLocalWriteAtRef.current = Date.now();
+    setMatches(updatedMatches);
+    setPlayers(updatedPlayers);
+    if (updatedClub) {
+      setClubProfile(updatedClub);
+    }
+    const live = updatedMatches.find((m) => m.status === 'live');
+    if (live) {
+      setActiveMatch(live);
+      activeMatchRef.current = live;
+    }
+  };
+
+  // Save Player handler
+  const handleSavePlayer = async (player: Player) => {
+    if (isReadOnlyViewer) return;
+    const normalized: Player = { ...player, teamCategory: player.teamCategory || 'TEAM' };
+    lastLocalWriteAtRef.current = Date.now();
+    await savePlayer(normalized);
+    const nextPlayers = (() => {
+      const idx = players.findIndex((p) => p.id === normalized.id);
+      if (idx >= 0) {
+        const copy = [...players];
+        copy[idx] = normalized;
+        return copy;
+      }
+      return [...players, normalized];
+    })().sort((a, b) => a.number - b.number);
+    setPlayers(nextPlayers);
+
+    if (roomId && coachToken) {
+      pushRoomStateImmediate(roomId, coachToken, {
+        matches,
+        players: nextPlayers,
+        activeMatchId: activeMatch?.id || null,
+        clubProfile,
+      });
+    }
+  };
+
+  // Delete Player handler
+  const handleDeletePlayer = async (id: string) => {
+    if (isReadOnlyViewer) return;
+    lastLocalWriteAtRef.current = Date.now();
+    await deletePlayer(id);
+    const nextPlayers = players.filter((p) => p.id !== id);
+    setPlayers(nextPlayers);
+
+    if (roomId && coachToken) {
+      pushRoomStateImmediate(roomId, coachToken, {
+        matches,
+        players: nextPlayers,
+        activeMatchId: activeMatch?.id || null,
+        clubProfile,
+      });
+    }
+  };
+
+  // Save Settings handler (including server PIN updates)
+  const handleSaveSettings = async (newSettings: AppSettings) => {
+    const pinChanged =
+      !isReadOnlyViewer &&
+      roomId &&
+      coachToken &&
+      newSettings.coachPin &&
+      newSettings.coachPin.trim().length >= 3 &&
+      newSettings.coachPin.trim() !== (settings.coachPin || '').trim();
+
+    setSettings(newSettings);
+    await saveSettings(newSettings);
+
+    if (pinChanged && roomId && coachToken) {
+      lastLocalWriteAtRef.current = Date.now();
+      await pushRoomStateImmediate(roomId, coachToken, {
+        newCoachPin: newSettings.coachPin!.trim(),
+      });
+    }
+  };
+
+  // Save Club Profile handler
+  const handleSaveClubProfile = async (newProfile: ClubProfile) => {
+    if (isReadOnlyViewer || !roomId) return;
+    lastLocalWriteAtRef.current = Date.now();
+    setClubProfile(newProfile);
+    await saveClubProfile(newProfile);
+    pushRoomStateImmediate(roomId, coachToken, {
+      matches,
+      players,
+      activeMatchId: activeMatch?.id || null,
+      clubProfile: newProfile,
+    });
+    saveRecentRoom({
+      roomId,
+      teamName: newProfile.name || 'Drużyna Koszykarska',
+      shortName: newProfile.shortName || 'DRUŻYNA',
+      city: newProfile.city || '',
+      badgeEmoji: newProfile.badgeEmoji || '🏀',
+      season: newProfile.season || '2026/2027',
+      role: 'coach',
+      coachToken: coachToken || undefined,
+      lastVisited: Date.now(),
+    });
+  };
+
+  // Apply predefined club preset
+  const handleApplyClubPreset = async (presetId: string) => {
+    if (isReadOnlyViewer || !roomId) return;
+    lastLocalWriteAtRef.current = Date.now();
+    const result = await resetToClubPreset(presetId);
+    setClubProfile(result.club);
+    setPlayers(result.players);
+    pushRoomStateImmediate(roomId, coachToken, {
+      matches,
+      players: result.players,
+      activeMatchId: activeMatch?.id || null,
+      clubProfile: result.club,
+    });
+  };
+
+  // Players updated after bulk import
+  const handlePlayersUpdated = async () => {
+    if (isReadOnlyViewer || !roomId) return;
+    lastLocalWriteAtRef.current = Date.now();
+    const updated = await getPlayers();
+    setPlayers(updated);
+    pushRoomStateImmediate(roomId, coachToken, {
+      matches,
+      players: updated,
+      activeMatchId: activeMatch?.id || null,
+      clubProfile,
+    });
+  };
+
+  // Lock coach controls and switch to Parent / Spectator read-only mode
+  const handleLockOrSwitchToSpectator = () => {
+    playClickSound();
+    triggerHaptic(30);
+    if (roomId) {
+      clearStoredCoachToken(roomId);
+      updateUrlForRoom(roomId, true);
+      saveRecentRoom({
+        roomId,
+        teamName: clubProfile.name || 'Drużyna Koszykarska',
+        shortName: clubProfile.shortName || 'DRUŻYNA',
+        city: clubProfile.city || '',
+        badgeEmoji: clubProfile.badgeEmoji || '🏀',
+        season: clubProfile.season || '2026/2027',
+        role: 'spectator',
+        lastVisited: Date.now(),
+      });
+    }
+    setCoachToken(null);
+    setIsReadOnlyViewer(true);
+  };
+
+  // 1. Standalone Parent Mode from Lobby (1 child tracker)
+  if (!roomId && lobbyParentMode) {
+    return (
+      <div className="min-h-screen w-full bg-slate-950 text-slate-100 p-3 sm:p-6">
+        <div className="max-w-7xl mx-auto">
+          <ParentView
+            onBackToHome={() => setLobbyParentMode(false)}
+            soundEnabled={settings.ttsEnabled}
+          />
+        </div>
+        <OfflineIndicator />
+      </div>
+    );
+  }
+
+  // 2. Room Lobby (when no ?room= is selected)
+  if (!roomId) {
+    return (
+      <>
+        <RoomLobby
+          onEnterRoom={handleEnterRoom}
+          onOpenParentMode={() => setLobbyParentMode(true)}
+          initialError={roomLoadError}
+        />
+        <OfflineIndicator />
+      </>
+    );
+  }
+
+  // 3. Loading Room Screen
+  if (isLoading) {
+    return (
+      <div className="min-h-screen bg-slate-950 flex flex-col items-center justify-center p-4 text-slate-100">
+        <div className="w-16 h-16 rounded-2xl bg-gradient-to-br from-amber-500 to-orange-600 flex items-center justify-center text-3xl shadow-xl shadow-orange-950/50">
+          {clubProfile.badgeEmoji || '🏀'}
+        </div>
+        <h2 className="mt-4 text-base font-black tracking-tight text-white uppercase">
+          {clubProfile.name || 'BasketStats Pro'}
+        </h2>
+        <p className="text-xs text-amber-400 font-medium mt-1">
+          Łączenie z pokojem drużyny ({roomId})...
+        </p>
+      </div>
+    );
+  }
+
+  const activeRosterPlayers = activeMatch
+    ? activeMatch.rosterPlayerIds?.length
+      ? players.filter((p) => activeMatch.rosterPlayerIds.includes(p.id))
+      : players
+    : players;
+
+  return (
+    <div className="min-h-screen w-full max-w-full overflow-x-hidden bg-slate-950 text-slate-100 flex flex-col selection:bg-amber-500 selection:text-slate-950">
+      {/* Top Navigation */}
+      <Navbar
+        currentTab={currentTab}
+        onSelectTab={setCurrentTab}
+        activeMatch={activeMatch}
+        clubProfile={clubProfile}
+        roomId={roomId}
+        onExitRoom={handleExitRoom}
+        onOpenClubProfile={!isReadOnlyViewer ? () => setIsClubProfileOpen(true) : undefined}
+        onOpenLegalModal={() => setIsLegalModalOpen(true)}
+        onOpenNewMatchModal={!isReadOnlyViewer ? () => setIsNewMatchOpen(true) : undefined}
+        onOpenSettingsModal={!isReadOnlyViewer ? () => setIsSettingsOpen(true) : undefined}
+        soundEnabled={settings.ttsEnabled}
+        onToggleSound={() => handleSaveSettings({ ...settings, ttsEnabled: !settings.ttsEnabled })}
+        readOnly={isReadOnlyViewer}
+        onOpenShareModal={() => {
+          setJustCreatedRoom(false);
+          setIsShareModalOpen(true);
+        }}
+        onOpenCoachLogin={() => setIsCoachPinOpen(true)}
+        onSwitchToSpectator={handleLockOrSwitchToSpectator}
+        onOpenTransferModal={() => setIsTransferModalOpen(true)}
+        onOpenTeamExportImport={!isReadOnlyViewer ? handleOpenTeamExportImport : undefined}
+      />
+
+      {/* Main Container */}
+      <main className="flex-1 flex flex-col">
+        {/* VIEW 0: HOME PAGE */}
+        {currentTab === 'home' && (
+          <HomePage
+            activeMatch={activeMatch}
+            matches={matches}
+            players={players}
+            clubProfile={clubProfile}
+            onOpenClubProfile={!isReadOnlyViewer ? () => setIsClubProfileOpen(true) : undefined}
+            onOpenLegalModal={() => setIsLegalModalOpen(true)}
+            onOpenNewMatch={!isReadOnlyViewer ? () => setIsNewMatchOpen(true) : undefined}
+            onResumeMatch={!isReadOnlyViewer ? handleResumeMatch : undefined}
+            onGoToLive={() => setCurrentTab('live')}
+            onGoToRoster={() => setCurrentTab('roster')}
+            onGoToHistory={() => setCurrentTab('history')}
+            onGoToParent={() => setCurrentTab('parent')}
+            readOnly={isReadOnlyViewer}
+            onOpenShareModal={() => {
+              setJustCreatedRoom(false);
+              setIsShareModalOpen(true);
+            }}
+            onOpenTransferModal={() => setIsTransferModalOpen(true)}
+            onOpenTeamExport={!isReadOnlyViewer ? () => handleOpenTeamExportImport('export') : undefined}
+          />
+        )}
+
+        {/* VIEW 1: LIVE MATCH */}
+        {currentTab === 'live' && (
+          <>
+            {activeMatch ? (
+              <LiveMatch
+                match={activeMatch}
+                players={players}
+                clubProfile={clubProfile}
+                onUpdateMatch={handleUpdateMatch}
+                onFinishMatch={handleRequestFinishMatch}
+                soundEnabled={settings.ttsEnabled}
+                onToggleSound={() =>
+                  handleSaveSettings({ ...settings, ttsEnabled: !settings.ttsEnabled })
+                }
+                handMode={settings.handMode}
+                readOnly={isReadOnlyViewer}
+              />
+            ) : isReadOnlyViewer ? (
+              /* Spectator View: No Active Match */
+              <div className="flex-1 flex flex-col items-center justify-center p-4 sm:p-6 text-center max-w-lg mx-auto">
+                <div className="w-20 h-20 rounded-3xl bg-gradient-to-br from-amber-500/20 to-orange-600/20 border-2 border-amber-500/40 flex items-center justify-center text-4xl shadow-2xl mb-5">
+                  {clubProfile.badgeEmoji || '🏀'}
+                </div>
+
+                <div className="flex flex-wrap items-center justify-center gap-2 mb-3">
+                  <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-amber-500/15 border border-amber-500/30 text-amber-300 text-xs font-bold">
+                    <ShieldCheck className="w-3.5 h-3.5" />
+                    <span>{clubProfile.name}</span>
+                  </div>
+                  <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-rose-500/15 border border-rose-500/30 text-rose-300 text-xs font-bold">
+                    <span className="w-2 h-2 rounded-full bg-rose-500" />
+                    <span>
+                      {wsStatus === 'connected'
+                        ? 'Tryb Kibica • Połączono na żywo'
+                        : 'Tryb Kibica • Nasłuchiwanie na żywo'}
+                    </span>
+                  </div>
+                </div>
+
+                <h2 className="text-2xl sm:text-3xl font-black text-white tracking-tight">
+                  Oczekiwanie na mecz na żywo...
+                </h2>
+                <p className="text-xs sm:text-sm text-slate-400 mt-2 leading-relaxed">
+                  Aktualnie żaden mecz drużyny w tym pokoju nie jest w trakcie rozgrywania. Gdy trener rozpocznie rejestrację meczu, tablica wyników i protokół pojawią się tutaj automatycznie.
+                </p>
+
+                <div className="w-full mt-5 flex items-center justify-center">
+                  <button
+                    onClick={async () => {
+                      playClickSound();
+                      const { data: serverData } = await fetchRoomState(roomId, null);
+                      if (serverData) {
+                        applyServerRoomState(serverData, true);
+                      }
+                    }}
+                    className="py-2.5 px-4 rounded-xl bg-slate-900 hover:bg-slate-800 border border-slate-700 text-slate-300 hover:text-white text-xs font-bold transition flex items-center gap-2 shadow-sm"
+                  >
+                    <RefreshCw className="w-3.5 h-3.5 text-amber-400" />
+                    <span>Sprawdź pokój teraz</span>
+                  </button>
+                </div>
+
+                <div className="w-full mt-6 grid grid-cols-2 gap-2.5">
+                  <button
+                    onClick={() => setCurrentTab('roster')}
+                    className="py-3 px-4 rounded-xl bg-slate-900 hover:bg-slate-800 border border-slate-800 text-slate-200 text-xs font-bold transition flex items-center justify-center gap-1.5 shadow-md"
+                  >
+                    <Users className="w-4 h-4 text-amber-400" />
+                    <span>Kadra & Eval ({players.length})</span>
+                  </button>
+
+                  <button
+                    onClick={() => setCurrentTab('history')}
+                    className="py-3 px-4 rounded-xl bg-slate-900 hover:bg-slate-800 border border-slate-800 text-slate-200 text-xs font-bold transition flex items-center justify-center gap-1.5 shadow-md"
+                  >
+                    <Trophy className="w-4 h-4 text-amber-400" />
+                    <span>Historia meczów</span>
+                  </button>
+                </div>
+
+                {matches.length > 0 && (
+                  <div className="w-full mt-6 p-4 rounded-2xl bg-slate-900/90 border border-slate-800 text-left">
+                    <div className="text-[11px] font-black uppercase text-amber-400 tracking-wider mb-2 flex items-center justify-between">
+                      <span>Ostatni zarejestrowany mecz:</span>
+                      <span className="text-slate-400 font-mono text-[10px]">{matches[0].date}</span>
+                    </div>
+                    <div className="flex items-center justify-between gap-3">
+                      <div>
+                        <div className="text-sm font-bold text-white">
+                          vs {matches[0].opponent}
+                        </div>
+                        <div className="text-xs text-amber-400 font-mono font-bold mt-0.5">
+                          Wynik: {matches[0].ourScore} : {matches[0].opponentScore}
+                        </div>
+                      </div>
+                      <button
+                        onClick={() => setCurrentTab('history')}
+                        className="py-2 px-3 rounded-xl bg-amber-500/20 hover:bg-amber-500/30 border border-amber-500/40 text-amber-300 text-xs font-bold transition flex items-center gap-1 shrink-0"
+                      >
+                        <span>Protokół</span>
+                        <ArrowRight className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+                  </div>
+                )}
+
+                {matches.length > 1 && (
+                  <div className="w-full mt-8 text-left border-t border-slate-800/80 pt-4">
+                    <span className="text-[11px] font-bold uppercase tracking-wider text-slate-500 block mb-2">
+                      Ostatnie zakończone mecze:
+                    </span>
+                    <div className="space-y-2">
+                      {matches.slice(0, 3).map((m) => (
+                        <div
+                          key={m.id}
+                          onClick={() => setCurrentTab('history')}
+                          className="p-3 rounded-xl bg-slate-900 border border-slate-800 hover:border-slate-700 flex items-center justify-between cursor-pointer transition"
+                        >
+                          <div>
+                            <div className="text-xs font-bold text-white">vs {m.opponent}</div>
+                            <div className="text-[10px] text-slate-400 font-mono">
+                              {m.date} • {m.ourScore} : {m.opponentScore}
+                            </div>
+                          </div>
+                          <span className="text-xs font-bold text-amber-400 flex items-center gap-1">
+                            <span>Zobacz raport</span>
+                            <ArrowRight className="w-3.5 h-3.5" />
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+            ) : (
+              /* Coach View: No Active Match Court Lobby */
+              <div className="flex-1 flex flex-col items-center justify-center p-4 sm:p-6 text-center max-w-lg mx-auto">
+                <div className="w-20 h-20 rounded-3xl bg-gradient-to-br from-amber-500/20 to-orange-600/20 border-2 border-amber-500/40 flex items-center justify-center text-4xl shadow-2xl mb-5">
+                  {clubProfile.badgeEmoji || '🏀'}
+                </div>
+
+                <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-amber-500/15 border border-amber-500/30 text-amber-300 text-xs font-bold mb-3">
+                  <ShieldCheck className="w-3.5 h-3.5" />
+                  <span>{clubProfile.name}</span>
+                </div>
+
+                <h2 className="text-2xl sm:text-3xl font-black text-white tracking-tight">
+                  Gotowy do rejestracji meczu?
+                </h2>
+                <p className="text-xs sm:text-sm text-slate-400 mt-2 leading-relaxed">
+                  Profesjonalne statystyki meczowe na żywo dostosowane do obsługi jedną ręką na telefonie. Wszystkie dane synchronizują się z tym pokojem i działają także offline.
+                </p>
+
+                <div className="w-full mt-6 space-y-3">
+                  <button
+                    onClick={() => setIsNewMatchOpen(true)}
+                    className="w-full py-4 px-6 rounded-2xl bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-400 hover:to-orange-400 text-slate-950 font-black text-base shadow-xl shadow-orange-950/50 transition transform active:scale-98 flex items-center justify-center gap-2"
+                  >
+                    <PlusCircle className="w-5 h-5" />
+                    <span>Rozpocznij Nowy Mecz</span>
+                  </button>
+
+                  <div className="grid grid-cols-2 gap-2">
+                    <button
+                      onClick={() => setCurrentTab('roster')}
+                      className="py-3 px-4 rounded-xl bg-slate-900 hover:bg-slate-800 border border-slate-800 text-slate-200 text-xs font-bold transition flex items-center justify-center gap-1.5"
+                    >
+                      <Users className="w-4 h-4 text-amber-400" />
+                      <span>Kadra ({players.length} graczy)</span>
+                    </button>
+
+                    <button
+                      onClick={() => setCurrentTab('history')}
+                      className="py-3 px-4 rounded-xl bg-slate-900 hover:bg-slate-800 border border-slate-800 text-slate-200 text-xs font-bold transition flex items-center justify-center gap-1.5"
+                    >
+                      <Trophy className="w-4 h-4 text-amber-400" />
+                      <span>Historia spotkań</span>
+                    </button>
+                  </div>
+                </div>
+
+                {matches.length > 0 && (
+                  <div className="w-full mt-8 text-left border-t border-slate-800/80 pt-4">
+                    <span className="text-[11px] font-bold uppercase tracking-wider text-slate-500 block mb-2">
+                      Ostatnie mecze drużyny:
+                    </span>
+                    <div className="space-y-2">
+                      {matches.slice(0, 2).map((m) => (
+                        <div
+                          key={m.id}
+                          onClick={() => handleResumeMatch(m)}
+                          className="p-3 rounded-xl bg-slate-900 border border-slate-800 hover:border-slate-700 flex items-center justify-between cursor-pointer transition"
+                        >
+                          <div>
+                            <div className="text-xs font-bold text-white">vs {m.opponent}</div>
+                            <div className="text-[10px] text-slate-400 font-mono">
+                              {m.date} • {m.ourScore} : {m.opponentScore}
+                            </div>
+                          </div>
+                          <span className="text-xs font-bold text-amber-400 flex items-center gap-1">
+                            <span>Wznów</span>
+                            <ArrowRight className="w-3.5 h-3.5" />
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+          </>
+        )}
+
+        {/* VIEW 2: ROSTER MANAGEMENT */}
+        {currentTab === 'roster' && (
+          <div className="flex-1 p-3 sm:p-6 max-w-7xl mx-auto w-full">
+            <RosterManagement
+              players={players}
+              clubProfile={clubProfile}
+              onOpenClubProfile={!isReadOnlyViewer ? () => setIsClubProfileOpen(true) : undefined}
+              onSavePlayer={!isReadOnlyViewer ? handleSavePlayer : undefined}
+              onDeletePlayer={!isReadOnlyViewer ? handleDeletePlayer : undefined}
+              matches={matches}
+              readOnly={isReadOnlyViewer}
+              onOpenTeamExport={!isReadOnlyViewer ? () => handleOpenTeamExportImport('export') : undefined}
+              onOpenTeamImport={!isReadOnlyViewer ? () => handleOpenTeamExportImport('import') : undefined}
+            />
+          </div>
+        )}
+
+        {/* VIEW 3: MATCH HISTORY & REPORTS */}
+        {currentTab === 'history' && (
+          <div className="flex-1 p-3 sm:p-6 max-w-7xl mx-auto w-full">
+            <MatchHistory
+              matches={matches}
+              players={players}
+              clubProfile={clubProfile}
+              onResumeMatch={!isReadOnlyViewer ? handleResumeMatch : undefined}
+              onDeleteMatch={!isReadOnlyViewer ? handleDeleteMatch : undefined}
+              readOnly={isReadOnlyViewer}
+              onGoToLive={() => setCurrentTab('live')}
+              onOpenTransferModal={() => setIsTransferModalOpen(true)}
+              onOpenTeamExport={!isReadOnlyViewer ? () => handleOpenTeamExportImport('export') : undefined}
+            />
+          </div>
+        )}
+
+        {/* VIEW 4: PARENT MODE (STATYSTYKI WŁASNEGO DZIECKA) */}
+        {currentTab === 'parent' && (
+          <div className="flex-1 p-3 sm:p-6 max-w-7xl mx-auto w-full">
+            <ParentView
+              onBackToHome={() => setCurrentTab('home')}
+              soundEnabled={settings.ttsEnabled}
+            />
+          </div>
+        )}
+      </main>
+
+      {/* Offline Connectivity Banner */}
+      <OfflineIndicator />
+
+      {/* Safety Confirmation Modal: Finish Match (Coach Mode Only) */}
+      {!isReadOnlyViewer && activeMatch && (
+        <FinishMatchModal
+          isOpen={isFinishModalOpen}
+          match={activeMatch}
+          rosterPlayers={activeRosterPlayers}
+          onConfirmFinish={handleConfirmFinishMatch}
+          onCancel={() => setIsFinishModalOpen(false)}
+        />
+      )}
+
+      {/* New Match Modal (Coach Mode Only) */}
+      {!isReadOnlyViewer && (
+        <NewMatchModal
+          isOpen={isNewMatchOpen}
+          onClose={() => setIsNewMatchOpen(false)}
+          players={players}
+          clubProfile={clubProfile}
+          onStartMatch={handleStartNewMatch}
+        />
+      )}
+
+      {/* Settings Modal (Coach Mode Only) */}
+      {!isReadOnlyViewer && (
+        <SettingsModal
+          isOpen={isSettingsOpen}
+          onClose={() => setIsSettingsOpen(false)}
+          settings={settings}
+          onSaveSettings={handleSaveSettings}
+          onOpenTransferModal={() => setIsTransferModalOpen(true)}
+          onOpenLiveCustomizer={() => setIsLiveCustomizerOpen(true)}
+        />
+      )}
+
+      {/* Club Profile & Customization Modal */}
+      {!isReadOnlyViewer && (
+        <ClubProfileModal
+          isOpen={isClubProfileOpen}
+          onClose={() => setIsClubProfileOpen(false)}
+          clubProfile={clubProfile}
+          onSaveClubProfile={handleSaveClubProfile}
+          onApplyPreset={handleApplyClubPreset}
+          onPlayersUpdated={handlePlayersUpdated}
+          onOpenTeamExportModal={() => handleOpenTeamExportImport('export')}
+        />
+      )}
+
+      {/* Google Play, Licenses & Copyright Modal */}
+      <LegalLicensesModal
+        isOpen={isLegalModalOpen}
+        onClose={() => setIsLegalModalOpen(false)}
+      />
+
+      {/* Data Transfer & Cloud Sync Modal */}
+      <DataTransferModal
+        isOpen={isTransferModalOpen}
+        onClose={() => setIsTransferModalOpen(false)}
+        matches={matches}
+        players={players}
+        activeMatchId={activeMatch?.id || null}
+        roomId={roomId}
+        onDataImported={handleDataImported}
+        onOpenTeamExportModal={() => handleOpenTeamExportImport('export')}
+      />
+
+      {/* Team Export / Import Modal */}
+      <TeamExportImportModal
+        isOpen={isTeamExportImportOpen}
+        onClose={() => setIsTeamExportImportOpen(false)}
+        clubProfile={clubProfile}
+        players={players}
+        matches={matches}
+        onDataImported={handleDataImported}
+        defaultTab={teamExportImportTab}
+      />
+
+      {/* Share Spectator & Coach Room Links Modal */}
+      <ShareLinkModal
+        isOpen={isShareModalOpen}
+        onClose={() => {
+          setIsShareModalOpen(false);
+          setJustCreatedRoom(false);
+        }}
+        roomId={roomId}
+        coachToken={coachToken}
+        isCoach={!isReadOnlyViewer}
+        coachPin={settings.coachPin}
+        justCreated={justCreatedRoom}
+        onSwitchToSpectatorMode={handleLockOrSwitchToSpectator}
+        clubProfile={clubProfile}
+      />
+
+      {/* Coach PIN Unlock Modal (Room-Authenticated) */}
+      <CoachPinModal
+        isOpen={isCoachPinOpen}
+        onClose={() => setIsCoachPinOpen(false)}
+        teamName={clubProfile.name}
+        onVerifyPin={async (pin) => {
+          if (!roomId) {
+            return { ok: false, error: 'Brak aktywnego pokoju.' };
+          }
+          const res = await authenticateRoomCoach(roomId, { pin });
+          if (!res.authenticated || !res.coachToken) {
+            return { ok: false, error: res.error || 'Nieprawidłowy kod PIN trenera dla tego pokoju.' };
+          }
+          const validToken = res.coachToken;
+          setStoredCoachToken(roomId, validToken);
+          setCoachToken(validToken);
+          setIsReadOnlyViewer(false);
+          setIsCoachPinOpen(false);
+          updateUrlForRoom(roomId, true);
+
+          saveRecentRoom({
+            roomId,
+            teamName: clubProfile.name || 'Drużyna Koszykarska',
+            shortName: clubProfile.shortName || 'DRUŻYNA',
+            city: clubProfile.city || '',
+            badgeEmoji: clubProfile.badgeEmoji || '🏀',
+            season: clubProfile.season || '2026/2027',
+            role: 'coach',
+            coachToken: validToken,
+            lastVisited: Date.now(),
+          });
+
+          // Fetch room state with coach token to sync coachPin and latest data
+          const { data: authedState } = await fetchRoomState(roomId, validToken);
+          if (authedState?.coachPin) {
+            const nextSettings = { ...settings, coachPin: authedState.coachPin };
+            setSettings(nextSettings);
+            saveSettings(nextSettings).catch(() => {});
+          }
+          return { ok: true };
+        }}
+      />
+
+      {/* Virtual Live Match Customizer */}
+      <VirtualLiveMatchCustomizer
+        isOpen={isLiveCustomizerOpen}
+        onClose={() => setIsLiveCustomizerOpen(false)}
+      />
+    </div>
+  );
+}

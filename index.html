@@ -1,0 +1,193 @@
+<!doctype html>
+<html lang="pl">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+    <title>Statystyki Koszykarskie Live - Protokół i Mecz na Żywo</title>
+    <meta name="description" content="Profesjonalna aplikacja PWA do statystyk meczowych na żywo dla drużyn młodzieżowych i klubów koszykarskich." />
+    <meta property="og:title" content="Statystyki Koszykarskie Live - Protokół i Mecz na Żywo" />
+    <meta property="og:description" content="Profesjonalna aplikacja PWA do statystyk meczowych na żywo dla drużyn młodzieżowych i klubów koszykarskich." />
+    <meta property="og:type" content="website" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="theme-color" content="#020617" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="apple-mobile-web-app-title" content="BasketStats" />
+    <link rel="icon" type="image/svg+xml" href="/icon.svg" />
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+    <link rel="manifest" href="/manifest.webmanifest" />
+    <script>
+      // Unregister stale dev-sw.js and force-update any previously cached sw.js (e.g. old manifest cache)
+      if (typeof window !== 'undefined' && 'serviceWorker' in navigator) {
+        try {
+          navigator.serviceWorker.getRegistrations().then(function (regs) {
+            for (var i = 0; i < regs.length; i++) {
+              var swUrl = (regs[i].active && regs[i].active.scriptURL) || (regs[i].installing && regs[i].installing.scriptURL) || '';
+              if (swUrl.indexOf('dev-sw') !== -1) {
+                regs[i].unregister();
+              } else {
+                regs[i].update().catch(function () {});
+              }
+            }
+          }).catch(function () {});
+        } catch (e) {}
+      }
+      // Handle Vite HMR / Module Runner in environments with disabled WebSockets ("HMR: Disabled. Ignore WebSocket errors.")
+      (function () {
+        if (typeof window === 'undefined') return;
+        var NativeWebSocket = window.WebSocket;
+        if (!NativeWebSocket) return;
+
+        function isViteHmr(url, protocols) {
+          var urlStr = String(url || '');
+          var protoStr = Array.isArray(protocols) ? protocols.join(',') : String(protocols || '');
+          if (urlStr.indexOf('/ws') !== -1) {
+            return false;
+          }
+          return (
+            urlStr.indexOf('vite') !== -1 ||
+            urlStr.indexOf('hmr') !== -1 ||
+            protoStr.indexOf('vite-hmr') !== -1 ||
+            (window.location && urlStr.indexOf(window.location.host) !== -1)
+          );
+        }
+
+        class FakeViteWebSocket extends EventTarget {
+          static CONNECTING = 0;
+          static OPEN = 1;
+          static CLOSING = 2;
+          static CLOSED = 3;
+
+          CONNECTING = 0;
+          OPEN = 1;
+          CLOSING = 2;
+          CLOSED = 3;
+
+          readyState = 1; // Mark as already OPEN so @vite/client connects without waiting or erroring
+          url = '';
+          protocol = 'vite-hmr';
+          extensions = '';
+          bufferedAmount = 0;
+          binaryType = 'blob';
+
+          onopen = null;
+          onclose = null;
+          onerror = null;
+          onmessage = null;
+
+          constructor(url, protocols) {
+            super();
+            this.url = String(url || '');
+            this.protocol = Array.isArray(protocols) ? protocols[0] : (protocols || 'vite-hmr');
+          }
+
+          send(data) {
+            // No-op ping/pong or message
+          }
+
+          close(code, reason) {
+            this.readyState = 3;
+            var closeEvt = new CustomEvent('close', { detail: { code: code || 1000, reason: reason || 'Closed' } });
+            this.dispatchEvent(closeEvt);
+            if (typeof this.onclose === 'function') {
+              try { this.onclose(closeEvt); } catch (e) {}
+            }
+          }
+        }
+
+        var ProxiedWebSocket = new Proxy(NativeWebSocket, {
+          construct(target, args) {
+            var url = args[0];
+            var protocols = args[1];
+            if (isViteHmr(url, protocols)) {
+              return new FakeViteWebSocket(url, protocols);
+            }
+            return Reflect.construct(target, args, target);
+          }
+        });
+
+        window.WebSocket = ProxiedWebSocket;
+
+        function isViteClientNoise(val) {
+          if (!val) return false;
+          var str = '';
+          if (typeof val === 'string') {
+            str = val;
+          } else if (val instanceof Error) {
+            str = (val.message || '') + ' ' + (val.stack || '');
+          } else if (typeof val === 'object') {
+            str =
+              (val.message || '') +
+              ' ' +
+              (val.stack || '') +
+              ' ' +
+              (val.reason ? ((val.reason.message || '') + ' ' + (val.reason.stack || '')) : '') +
+              ' ' +
+              String(val);
+          }
+          return (
+            str.indexOf('createWebSocketModuleRunnerTransport') !== -1 ||
+            str.indexOf('@vite/client') !== -1 ||
+            str.indexOf('FakeViteWebSocket') !== -1 ||
+            str.indexOf('WebSocket') !== -1 ||
+            str.indexOf('vite:ws') !== -1 ||
+            str.indexOf('vite') !== -1 ||
+            str.indexOf('[vite]') !== -1
+          );
+        }
+
+        var origError = console.error;
+        console.error = function () {
+          for (var i = 0; i < arguments.length; i++) {
+            if (isViteClientNoise(arguments[i])) return;
+          }
+          return origError.apply(console, arguments);
+        };
+
+        var origWarn = console.warn;
+        console.warn = function () {
+          for (var i = 0; i < arguments.length; i++) {
+            if (isViteClientNoise(arguments[i])) return;
+          }
+          return origWarn.apply(console, arguments);
+        };
+
+        window.onerror = function (msg, url, lineNo, colNo, error) {
+          if (isViteClientNoise(msg) || isViteClientNoise(url) || isViteClientNoise(error)) {
+            return true;
+          }
+        };
+
+        window.addEventListener(
+          'error',
+          function (e) {
+            if (isViteClientNoise(e.message) || isViteClientNoise(e.filename) || isViteClientNoise(e.error)) {
+              e.preventDefault();
+              e.stopImmediatePropagation();
+              return true;
+            }
+          },
+          true
+        );
+
+        window.addEventListener(
+          'unhandledrejection',
+          function (e) {
+            if (isViteClientNoise(e.reason)) {
+              e.preventDefault();
+              e.stopImmediatePropagation();
+              return true;
+            }
+          },
+          true
+        );
+      })();
+    </script>
+  </head>
+  <body class="bg-slate-950 text-slate-100 antialiased select-none">
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>
+

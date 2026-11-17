@@ -1,0 +1,302 @@
+{
+  "matches": [],
+  "players": [
+    {
+      "id": "uks-2627-u13-103674",
+      "teamCategory": "U13",
+      "firstName": "Marcel",
+      "lastName": "Szewczuga",
+      "number": 3,
+      "position": "SF",
+      "notes": "Rocznik 2014 | 152 cm | SF/C",
+      "createdAt": 1791989000000
+    },
+    {
+      "id": "uks-2627-u13-111489",
+      "teamCategory": "U13",
+      "firstName": "Antoni",
+      "lastName": "Safandowski",
+      "number": 9,
+      "position": "SF",
+      "notes": "Rocznik 2014 | 150 cm | SF",
+      "createdAt": 1791989000000
+    },
+    {
+      "id": "uks-2627-u13-103667",
+      "teamCategory": "U13",
+      "firstName": "Wojciech",
+      "lastName": "Lenart",
+      "number": 10,
+      "position": "SG",
+      "notes": "Rocznik 2014 | 149 cm | SG/SF",
+      "createdAt": 1791989000000
+    },
+    {
+      "id": "uks-2627-u13-113866",
+      "teamCategory": "U13",
+      "firstName": "Filip",
+      "lastName": "Bolewski",
+      "number": 11,
+      "position": "SG",
+      "notes": "Rocznik 2014 | 155 cm | SG/SF",
+      "createdAt": 1791989000000
+    },
+    {
+      "id": "uks-2627-u13-122392",
+      "teamCategory": "U13",
+      "firstName": "Jerzy",
+      "lastName": "Janus",
+      "number": 14,
+      "position": "SF",
+      "notes": "Rocznik 2015 | 150 cm | SF",
+      "createdAt": 1791989000000
+    },
+    {
+      "id": "uks-2627-u13-120194",
+      "teamCategory": "U13",
+      "firstName": "Leonard",
+      "lastName": "Kropiwiec",
+      "number": 15,
+      "position": "SG",
+      "notes": "Rocznik 2016 | 152 cm | SG/PF",
+      "createdAt": 1791989000000
+    },
+    {
+      "id": "uks-2627-u13-118624",
+      "teamCategory": "U13",
+      "firstName": "Maksymilian",
+      "lastName": "Maciejczyk",
+      "number": 17,
+      "position": "SG",
+      "notes": "Rocznik 2016 | 149 cm | SG/SF",
+      "createdAt": 1791989000000
+    },
+    {
+      "id": "uks-2627-u13-122394",
+      "teamCategory": "U13",
+      "firstName": "Antoni",
+      "lastName": "Woźniak",
+      "number": 19,
+      "position": "PF",
+      "notes": "Rocznik 2015 | 152 cm | PF",
+      "createdAt": 1791989000000
+    },
+    {
+      "id": "uks-2627-u13-122393",
+      "teamCategory": "U13",
+      "firstName": "Jan",
+      "lastName": "Lodziński",
+      "number": 21,
+      "position": "SF",
+      "notes": "Rocznik 2014 | 148 cm | SF/C",
+      "createdAt": 1791989000000
+    },
+    {
+      "id": "uks-2627-u13-111492",
+      "teamCategory": "U13",
+      "firstName": "Aleksander",
+      "lastName": "Lenart",
+      "number": 30,
+      "position": "SG",
+      "notes": "Rocznik 2014 | 154 cm | SG/SF",
+      "createdAt": 1791989000000
+    },
+    {
+      "id": "uks-2627-u13-122715",
+      "teamCategory": "U13",
+      "firstName": "Jakub",
+      "lastName": "Piwoński",
+      "number": 77,
+      "position": "SG",
+      "notes": "Rocznik 2014 | 162 cm | SG/SF",
+      "createdAt": 1791989000000
+    },
+    {
+      "id": "uks-2627-u15-95578",
+      "teamCategory": "U15",
+      "firstName": "Karol",
+      "lastName": "Ziółkowski",
+      "number": 0,
+      "position": "PG",
+      "notes": "Rocznik 2013 | 170 cm | PG/SG",
+      "createdAt": 1791989000000
+    },
+    {
+      "id": "uks-2627-u15-122711",
+      "teamCategory": "U15",
+      "firstName": "Stanisław",
+      "lastName": "Badowski",
+      "number": 4,
+      "position": "SF",
+      "notes": "Rocznik 2013 | 180 cm | SF/PF",
+      "createdAt": 1791989000000
+    },
+    {
+      "id": "uks-2627-u15-122432",
+      "teamCategory": "U15",
+      "firstName": "Aleksander",
+      "lastName": "Kalsztein",
+      "number": 5,
+      "position": "PG",
+      "notes": "Rocznik 2012 | 150 cm | PG/SG",
+      "createdAt": 1791989000000
+    },
+    {
+      "id": "uks-2627-u15-123637",
+      "teamCategory": "U15",
+      "firstName": "Nataniel",
+      "lastName": "Dobroszek",
+      "number": 6,
+      "position": "PG",
+      "notes": "Rocznik 2012 | 175 cm | PG/SG",
+      "createdAt": 1791989000000
+    },
+    {
+      "id": "uks-2627-u15-123381",
+      "teamCategory": "U15",
+      "firstName": "Massimo",
+      "lastName": "Lombardi",
+      "number": 7,
+      "position": "SG",
+      "notes": "Rocznik 2013 | 165 cm | SG/SF",
+      "createdAt": 1791989000000
+    },
+    {
+      "id": "uks-2627-u15-123382",
+      "teamCategory": "U15",
+      "firstName": "Wojciech",
+      "lastName": "Skowron",
+      "number": 8,
+      "position": "SG",
+      "notes": "Rocznik 2012 | 183 cm | SG/SF",
+      "createdAt": 1791989000000
+    },
+    {
+      "id": "uks-2627-u15-123383",
+      "teamCategory": "U15",
+      "firstName": "Nikodem",
+      "lastName": "Słabecki",
+      "number": 9,
+      "position": "SG",
+      "notes": "Rocznik 2013 | 162 cm | SG/SF",
+      "createdAt": 1791989000000
+    },
+    {
+      "id": "uks-2627-u15-122434",
+      "teamCategory": "U15",
+      "firstName": "Mikołaj",
+      "lastName": "Wasiak",
+      "number": 10,
+      "position": "SG",
+      "notes": "Rocznik 2013 | 160 cm | SG/SF",
+      "createdAt": 1791989000000
+    },
+    {
+      "id": "uks-2627-u15-122433",
+      "teamCategory": "U15",
+      "firstName": "Julian",
+      "lastName": "Działak",
+      "number": 15,
+      "position": "SG",
+      "notes": "Rocznik 2013 | 174 cm | SG/SF",
+      "createdAt": 1791989000000
+    },
+    {
+      "id": "uks-2627-u15-122435",
+      "teamCategory": "U15",
+      "firstName": "Szymon",
+      "lastName": "Świtacz",
+      "number": 16,
+      "position": "PG",
+      "notes": "Rocznik 2012 | 162 cm | PG/SG",
+      "createdAt": 1791989000000
+    },
+    {
+      "id": "uks-2627-u15-113306",
+      "teamCategory": "U15",
+      "firstName": "Aleksander",
+      "lastName": "Wasiak",
+      "number": 17,
+      "position": "PG",
+      "notes": "Rocznik 2012 | 176 cm | PG/SG",
+      "createdAt": 1791989000000
+    },
+    {
+      "id": "uks-2627-u15-122710",
+      "teamCategory": "U15",
+      "firstName": "Mikołaj",
+      "lastName": "Jarzębiak",
+      "number": 19,
+      "position": "SG",
+      "notes": "Rocznik 2013 | 170 cm | SG/SF",
+      "createdAt": 1791989000000
+    },
+    {
+      "id": "uks-2627-u15-123634",
+      "teamCategory": "U15",
+      "firstName": "Emil",
+      "lastName": "Tarnovski",
+      "number": 24,
+      "position": "SG",
+      "notes": "Rocznik 2012 | 170 cm | SG/SF",
+      "createdAt": 1791989000000
+    },
+    {
+      "id": "uks-2627-u15-111492",
+      "teamCategory": "U15",
+      "firstName": "Aleksander",
+      "lastName": "Lenart",
+      "number": 30,
+      "position": "SG",
+      "notes": "Rocznik 2014 | 154 cm | SG/SF",
+      "createdAt": 1791989000000
+    },
+    {
+      "id": "uks-2627-u15-122709",
+      "teamCategory": "U15",
+      "firstName": "Michał",
+      "lastName": "Jaszczur",
+      "number": 32,
+      "position": "SG",
+      "notes": "Rocznik 2012 | 176 cm | SG/SF",
+      "createdAt": 1791989000000
+    },
+    {
+      "id": "uks-2627-u15-124040",
+      "teamCategory": "U15",
+      "firstName": "Heozhii",
+      "lastName": "Hubarov",
+      "number": 33,
+      "position": "SF",
+      "notes": "Rocznik 2012 | 185 cm | SF/PF",
+      "createdAt": 1791989000000
+    },
+    {
+      "id": "uks-2627-u15-124180",
+      "teamCategory": "U15",
+      "firstName": "Patryk",
+      "lastName": "Grudziński",
+      "number": 34,
+      "position": "SF",
+      "notes": "Rocznik 2012 | 185 cm | SF/PF",
+      "createdAt": 1791989000000
+    }
+  ],
+  "activeMatchId": null,
+  "deletedMatchIds": ["match-demo-u13-skierniewice"],
+  "clubProfile": {
+    "id": "club-main",
+    "name": "Mój Klub Koszykarski",
+    "shortName": "KLUB",
+    "city": "Łódź",
+    "badgeEmoji": "🏀",
+    "primaryColor": "#f59e0b",
+    "secondaryColor": "#0a192f",
+    "headCoach": "Trener Główny",
+    "assistantCoach": "",
+    "categories": ["U13", "U15"],
+    "season": "2026/2027",
+    "leagueName": "Rozgrywki Młodzieżowe"
+  },
+  "lastUpdated": 0
+}

@@ -1,0 +1,8 @@
+{
+  "name": "HoopMetrics - Squad Edition - Basketball Statistics",
+  "description": "Your Team. Your Game. Your Numbers.\n\nKompleksowe statystyki koszykarskie w jednym miejscu. Rejestruj mecze, analizuj indywidualne osiągnięcia zawodników, monitoruj wyniki zespołu i śledź postępy przez cały sezon.\n\nEvery Game Counts, Every Player Matters.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
