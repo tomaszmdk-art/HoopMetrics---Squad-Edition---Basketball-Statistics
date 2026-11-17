@@ -99,10 +99,20 @@ function createDefaultClubProfile(overrides: Partial<ServerClubProfile> = {}): S
 }
 
 // ==========================================
-// PERSISTENCE LAYER (Redis/KV + Local/Tmp Disk)
+// PERSISTENCE LAYER (Postgres + Redis/KV + Disk/Tmp)
 // ==========================================
 
 const isVercelEnv = Boolean(process.env.VERCEL);
+
+function getPostgresConnectionString(): string | null {
+  const url = (
+    process.env.POSTGRES_URL ||
+    process.env.POSTGRES_PRISMA_URL ||
+    process.env.DATABASE_URL ||
+    ''
+  ).trim();
+  return url || null;
+}
 
 function getRedisRestConfig(): { url: string; token: string } | null {
   const url = (process.env.KV_REST_API_URL || process.env.UPSTASH_REDIS_REST_URL || '').trim();
@@ -113,7 +123,8 @@ function getRedisRestConfig(): { url: string; token: string } | null {
   return null;
 }
 
-export function getPersistenceMode(): 'redis' | 'ephemeral-tmp' | 'disk' {
+export function getPersistenceMode(): 'postgres' | 'redis' | 'ephemeral-tmp' | 'disk' {
+  if (getPostgresConnectionString()) return 'postgres';
   if (getRedisRestConfig()) return 'redis';
   if (isVercelEnv) return 'ephemeral-tmp';
   return 'disk';
@@ -130,7 +141,6 @@ function resolveDataDirs(): { dataDir: string; roomsDir: string } {
       try {
         fs.mkdirSync(dir, { recursive: true });
       } catch {
-        // Fallback to tmpdir if cwd is read-only
         const fallbackBase = path.join(os.tmpdir(), 'basketstats-data');
         const fallbackRooms = path.join(fallbackBase, 'rooms');
         try {
@@ -158,6 +168,41 @@ function getRoomFilePath(roomId: string): string {
 
 function getRedisRoomKey(roomId: string): string {
   return `basketstats:room:${roomId}`;
+}
+
+// Lazy PostgreSQL pool & schema initialization
+let pgPoolPromise: Promise<any> | null = null;
+
+async function getPgPool(): Promise<any | null> {
+  const connStr = getPostgresConnectionString();
+  if (!connStr) return null;
+
+  if (!pgPoolPromise) {
+    pgPoolPromise = (async () => {
+      const pgMod = await import('pg');
+      const PoolCtor = pgMod.default?.Pool || pgMod.Pool;
+      const useSsl = !connStr.includes('sslmode=disable') && !connStr.includes('localhost') && !connStr.includes('127.0.0.1');
+      const pool = new PoolCtor({
+        connectionString: connStr,
+        max: 5,
+        ssl: useSsl ? { rejectUnauthorized: false } : undefined,
+      });
+      await pool.query(`
+        CREATE TABLE IF NOT EXISTS basketstats_rooms (
+          room_id TEXT PRIMARY KEY,
+          data JSONB NOT NULL,
+          updated_at BIGINT NOT NULL
+        );
+      `);
+      return pool;
+    })().catch((err) => {
+      console.error('PostgreSQL init error:', err);
+      pgPoolPromise = null;
+      return null;
+    });
+  }
+
+  return pgPoolPromise;
 }
 
 async function redisCommand<T = unknown>(command: unknown[]): Promise<T | null> {
@@ -203,18 +248,36 @@ function normalizeLoadedRoom(parsed: ServerRoomState): ServerRoomState | null {
 export async function saveRoom(room: ServerRoomState): Promise<void> {
   roomsCache.set(room.roomId, room);
 
+  // 1. PostgreSQL (Neon / Supabase / Vercel Postgres)
+  const pool = await getPgPool();
+  if (pool) {
+    try {
+      await pool.query(
+        `INSERT INTO basketstats_rooms (room_id, data, updated_at)
+         VALUES ($1, $2::jsonb, $3)
+         ON CONFLICT (room_id)
+         DO UPDATE SET data = EXCLUDED.data, updated_at = EXCLUDED.updated_at`,
+        [room.roomId, JSON.stringify(room), room.lastUpdated || Date.now()]
+      );
+    } catch (err) {
+      console.error(`Failed to save room ${room.roomId} to PostgreSQL:`, err);
+    }
+  }
+
+  // 2. Upstash Redis / Vercel KV REST
   const redisCfg = getRedisRestConfig();
   if (redisCfg) {
     await redisCommand(['SET', getRedisRoomKey(room.roomId), JSON.stringify(room)]);
   }
 
+  // 3. Disk / tmp fallback
   try {
     if (!fs.existsSync(roomsDir)) {
       fs.mkdirSync(roomsDir, { recursive: true });
     }
     fs.writeFileSync(getRoomFilePath(room.roomId), JSON.stringify(room, null, 2), 'utf-8');
   } catch (err) {
-    if (!redisCfg) {
+    if (!pool && !redisCfg) {
       console.error(`Failed to persist room ${room.roomId}:`, err);
     }
   }
@@ -224,7 +287,29 @@ export async function loadRoom(roomId: string): Promise<ServerRoomState | null> 
   const cleanId = sanitizeRoomId(roomId);
   if (!cleanId) return null;
 
-  // When Redis is configured, always check Redis so multiple serverless instances stay in sync
+  // 1. PostgreSQL
+  const pool = await getPgPool();
+  if (pool) {
+    try {
+      const result = await pool.query(
+        'SELECT data FROM basketstats_rooms WHERE room_id = $1 LIMIT 1',
+        [cleanId]
+      );
+      if (result.rows && result.rows.length > 0 && result.rows[0].data) {
+        const rawData = result.rows[0].data;
+        const parsedObj = typeof rawData === 'string' ? JSON.parse(rawData) : rawData;
+        const parsed = normalizeLoadedRoom(parsedObj as ServerRoomState);
+        if (parsed) {
+          roomsCache.set(cleanId, parsed);
+          return parsed;
+        }
+      }
+    } catch (err) {
+      console.error(`Failed to load room ${cleanId} from PostgreSQL:`, err);
+    }
+  }
+
+  // 2. Upstash Redis / Vercel KV REST
   const redisCfg = getRedisRestConfig();
   if (redisCfg) {
     const raw = await redisCommand<string>(['GET', getRedisRoomKey(cleanId)]);
@@ -241,6 +326,7 @@ export async function loadRoom(roomId: string): Promise<ServerRoomState | null> 
     }
   }
 
+  // 3. In-memory cache & disk/tmp fallback
   const cached = roomsCache.get(cleanId);
   if (cached) return cached;
 
@@ -453,7 +539,7 @@ export function createApiApp(options: CreateApiAppOptions = {}): Express {
       });
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : 'Błąd tworzenia pokoju drużyny';
-      res.status(500).json({ error: msg });
+      res.status(500).json({ success: false, error: msg });
     }
   });
 
@@ -589,7 +675,6 @@ export function createApiApp(options: CreateApiAppOptions = {}): Express {
       const deletedArr = Array.from(deletedSet);
       room.deletedMatchIds = deletedArr.length > 500 ? deletedArr.slice(-500) : deletedArr;
 
-      // Remove deleted matches
       room.matches = (room.matches || []).filter(
         (m: any) => m && m.id && !deletedSet.has(m.id)
       );
@@ -673,7 +758,6 @@ export function createApiApp(options: CreateApiAppOptions = {}): Express {
   // AI & VOICE ENDPOINTS
   // ==========================================
 
-  // TTS Endpoint using gemini-3.8-flash-tts
   app.post('/api/tts', async (req: Request, res: Response) => {
     try {
       const { text, voice = 'Puck', style = 'Energetic Polish basketball announcer' } = req.body;
@@ -745,7 +829,6 @@ export function createApiApp(options: CreateApiAppOptions = {}): Express {
     }
   });
 
-  // AI Coach Match Recap using gemini-3.8-flash
   app.post('/api/ai-recap', async (req: Request, res: Response) => {
     try {
       const { matchData } = req.body;
@@ -791,7 +874,6 @@ Wyróżniający się gracze: ${JSON.stringify(matchData.topPerformers || [])}`;
     }
   });
 
-  // AI Voice Command Parser using gemini-3.8-flash
   app.post('/api/parse-voice-command', async (req: Request, res: Response) => {
     try {
       const { text, players } = req.body;
