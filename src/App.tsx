@@ -149,8 +149,21 @@ export default function App() {
   const [isLoading, setIsLoading] = useState<boolean>(() => Boolean(initialUrlRef.current.roomId));
 
   const [serverPersistence, setServerPersistence] = useState<ServerPersistenceMode | null>(null);
+  const [detectedDbKeys, setDetectedDbKeys] = useState<string[] | null>(null);
   const [dismissedPersistenceBanner, setDismissedPersistenceBanner] = useState(false);
   const pendingCreatedStateRef = useRef<{ roomId: string; state: ServerSyncData } | null>(null);
+
+  useEffect(() => {
+    if (serverPersistence !== 'ephemeral-tmp') return;
+    fetch('/api/health', { cache: 'no-store' })
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data) => {
+        if (data && Array.isArray(data.detectedDbEnvKeys)) {
+          setDetectedDbKeys(data.detectedDbEnvKeys);
+        }
+      })
+      .catch(() => {});
+  }, [serverPersistence]);
 
   const lastLocalWriteAtRef = useRef<number>(0);
   const syncFingerprintsRef = useRef({
@@ -1140,7 +1153,12 @@ export default function App() {
           <div className="flex items-center gap-2 max-w-5xl mx-auto">
             <AlertTriangle className="w-4 h-4 text-amber-400 shrink-0" />
             <span>
-              <strong>Brak trwałej bazy danych na Vercel:</strong> pokój działa lokalnie w tej przeglądarce, ale bez podłączonej bazy (<strong>Neon Postgres</strong> lub <strong>Upstash Redis</strong> w zakładce <em>Storage</em> na Vercel + Redeploy) link nie zadziała na telefonach rodziców.
+              <strong>Brak trwałej bazy danych na Vercel:</strong> pokój działa lokalnie w tej przeglądarce, ale bez podłączonej bazy (<strong>Neon Postgres</strong>, <strong>Upstash</strong> lub <strong>Redis</strong> w zakładce <em>Storage</em> na Vercel + Redeploy) link nie zadziała na telefonach rodziców.
+              {detectedDbKeys !== null && (
+                <span className="ml-1 text-amber-300/90 font-mono text-[11px]">
+                  ({detectedDbKeys.length > 0 ? `Wykryte klucze: ${detectedDbKeys.join(', ')}` : 'Brak wykrytych zmiennych bazy w Production'})
+                </span>
+              )}
             </span>
           </div>
           <button

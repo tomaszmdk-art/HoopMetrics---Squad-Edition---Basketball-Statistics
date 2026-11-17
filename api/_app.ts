@@ -104,16 +104,21 @@ function createDefaultClubProfile(overrides: Partial<ServerClubProfile> = {}): S
 
 const isVercelEnv = Boolean(process.env.VERCEL);
 
-function findEnvValue(exactKeys: string[], suffixPatterns: string[]): string | null {
+function findEnvValue(
+  exactKeys: string[],
+  suffixPatterns: string[],
+  validator?: (val: string) => boolean
+): string | null {
   for (const key of exactKeys) {
     const val = (process.env[key] || '').trim();
-    if (val) return val;
+    if (val && (!validator || validator(val))) return val;
   }
   for (const [key, rawVal] of Object.entries(process.env)) {
     if (!rawVal || !rawVal.trim()) continue;
+    const trimmed = rawVal.trim();
     for (const suffix of suffixPatterns) {
-      if (key.endsWith(suffix)) {
-        return rawVal.trim();
+      if (key.endsWith(suffix) && (!validator || validator(trimmed))) {
+        return trimmed;
       }
     }
   }
@@ -123,14 +128,16 @@ function findEnvValue(exactKeys: string[], suffixPatterns: string[]): string | n
 function getPostgresConnectionString(): string | null {
   return findEnvValue(
     ['POSTGRES_URL', 'POSTGRES_PRISMA_URL', 'POSTGRES_URL_NON_POOLING', 'DATABASE_URL'],
-    ['_POSTGRES_URL', '_POSTGRES_PRISMA_URL', '_DATABASE_URL']
+    ['_POSTGRES_URL', '_POSTGRES_PRISMA_URL', '_POSTGRES_URL_NON_POOLING', '_DATABASE_URL', '_DATABASE_URL_UNPOOLED'],
+    (v) => v.startsWith('postgres://') || v.startsWith('postgresql://')
   );
 }
 
 function getRedisRestConfig(): { url: string; token: string } | null {
   const url = findEnvValue(
     ['KV_REST_API_URL', 'UPSTASH_REDIS_REST_URL'],
-    ['_KV_REST_API_URL', '_UPSTASH_REDIS_REST_URL']
+    ['_KV_REST_API_URL', '_UPSTASH_REDIS_REST_URL'],
+    (v) => v.startsWith('http://') || v.startsWith('https://')
   );
   const token = findEnvValue(
     ['KV_REST_API_TOKEN', 'UPSTASH_REDIS_REST_TOKEN'],
@@ -142,9 +149,17 @@ function getRedisRestConfig(): { url: string; token: string } | null {
   return null;
 }
 
+function getRedisTcpUrl(): string | null {
+  return findEnvValue(
+    ['REDIS_URL', 'KV_URL'],
+    ['_REDIS_URL', '_KV_URL'],
+    (v) => v.startsWith('redis://') || v.startsWith('rediss://')
+  );
+}
+
 export function getPersistenceMode(): 'postgres' | 'redis' | 'ephemeral-tmp' | 'disk' {
   if (getPostgresConnectionString()) return 'postgres';
-  if (getRedisRestConfig()) return 'redis';
+  if (getRedisRestConfig() || getRedisTcpUrl()) return 'redis';
   if (isVercelEnv) return 'ephemeral-tmp';
   return 'disk';
 }
@@ -224,6 +239,32 @@ async function getPgPool(): Promise<any | null> {
   return pgPoolPromise;
 }
 
+let redisTcpPromise: Promise<any> | null = null;
+
+async function getRedisTcpClient(): Promise<any | null> {
+  const redisUrl = getRedisTcpUrl();
+  if (!redisUrl) return null;
+
+  if (!redisTcpPromise) {
+    redisTcpPromise = (async () => {
+      const mod = await import('ioredis');
+      const RedisCtor = (mod as any).default || mod;
+      const client = new RedisCtor(redisUrl, {
+        maxRetriesPerRequest: 2,
+        connectTimeout: 5000,
+        ...(redisUrl.startsWith('rediss://') ? { tls: { rejectUnauthorized: false } } : {}),
+      });
+      return client;
+    })().catch((err) => {
+      console.error('Redis TCP init error:', err);
+      redisTcpPromise = null;
+      return null;
+    });
+  }
+
+  return redisTcpPromise;
+}
+
 async function redisCommand<T = unknown>(command: unknown[]): Promise<T | null> {
   const cfg = getRedisRestConfig();
   if (!cfg) return null;
@@ -299,6 +340,22 @@ export async function saveRoom(room: ServerRoomState, throwOnDbError = false): P
     }
   }
 
+  // 2b. Redis TCP (REDIS_URL / KV_URL)
+  const redisTcpUrl = !redisCfg ? getRedisTcpUrl() : null;
+  if (redisTcpUrl) {
+    const client = await getRedisTcpClient();
+    if (!client) {
+      if (throwOnDbError) throw new Error('Nie udało się połączyć z bazą Redis (REDIS_URL).');
+    } else {
+      try {
+        await client.set(getRedisRoomKey(room.roomId), JSON.stringify(room));
+      } catch (err) {
+        console.error(`Failed to save room ${room.roomId} to Redis TCP:`, err);
+        if (throwOnDbError) throw err;
+      }
+    }
+  }
+
   // 3. Disk / tmp fallback
   try {
     if (!fs.existsSync(roomsDir)) {
@@ -306,7 +363,7 @@ export async function saveRoom(room: ServerRoomState, throwOnDbError = false): P
     }
     fs.writeFileSync(getRoomFilePath(room.roomId), JSON.stringify(room, null, 2), 'utf-8');
   } catch (err) {
-    if (!connStr && !redisCfg) {
+    if (!connStr && !redisCfg && !redisTcpUrl) {
       console.error(`Failed to persist room ${room.roomId}:`, err);
     }
   }
@@ -351,6 +408,25 @@ export async function loadRoom(roomId: string): Promise<ServerRoomState | null> 
         }
       } catch (err) {
         console.error(`Failed to parse Redis room ${cleanId}:`, err);
+      }
+    }
+  }
+
+  // 2b. Redis TCP (REDIS_URL / KV_URL)
+  if (!redisCfg && getRedisTcpUrl()) {
+    const client = await getRedisTcpClient();
+    if (client) {
+      try {
+        const raw = await client.get(getRedisRoomKey(cleanId));
+        if (typeof raw === 'string' && raw.length > 0) {
+          const parsed = normalizeLoadedRoom(JSON.parse(raw) as ServerRoomState);
+          if (parsed) {
+            roomsCache.set(cleanId, parsed);
+            return parsed;
+          }
+        }
+      } catch (err) {
+        console.error(`Failed to load room ${cleanId} from Redis TCP:`, err);
       }
     }
   }
@@ -1031,15 +1107,31 @@ Zwróć TYLKO poprawny JSON (bez markdown) w formacie:
         dbError = err instanceof Error ? err.message : 'PostgreSQL connection error';
       }
     } else if (persistence === 'redis') {
-      const pong = await redisCommand(['PING']);
-      dbReachable = pong !== null;
-      if (!dbReachable) {
-        dbError = 'Redis REST PING failed';
+      if (getRedisRestConfig()) {
+        const pong = await redisCommand(['PING']);
+        dbReachable = pong !== null;
+        if (!dbReachable) {
+          dbError = 'Redis REST PING failed';
+        }
+      } else {
+        try {
+          const client = await getRedisTcpClient();
+          if (client) {
+            const pong = await client.ping();
+            dbReachable = Boolean(pong);
+          } else {
+            dbReachable = false;
+            dbError = 'Redis TCP client initialization failed';
+          }
+        } catch (err) {
+          dbReachable = false;
+          dbError = err instanceof Error ? err.message : 'Redis TCP connection error';
+        }
       }
     }
 
     const detectedDbEnvKeys = Object.keys(process.env)
-      .filter((k) => /(POSTGRES|DATABASE|REDIS|KV_REST|UPSTASH|NEON|SUPABASE)/i.test(k))
+      .filter((k) => /(POSTGRES|DATABASE|REDIS|KV_|UPSTASH|NEON|SUPABASE|PRISMA)/i.test(k))
       .sort();
 
     res.json({
