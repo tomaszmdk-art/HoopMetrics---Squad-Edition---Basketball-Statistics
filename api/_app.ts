@@ -1038,11 +1038,16 @@ Zwróć TYLKO poprawny JSON (bez markdown) w formacie:
       }
     }
 
+    const detectedDbEnvKeys = Object.keys(process.env)
+      .filter((k) => /(POSTGRES|DATABASE|REDIS|KV_REST|UPSTASH|NEON|SUPABASE)/i.test(k))
+      .sort();
+
     res.json({
       status: 'ok',
       service: 'BasketStats Pro Multi-Room API',
       persistence,
       dbReachable,
+      detectedDbEnvKeys,
       ...(dbError ? { dbError } : {}),
       supportsWebSocket,
     });
