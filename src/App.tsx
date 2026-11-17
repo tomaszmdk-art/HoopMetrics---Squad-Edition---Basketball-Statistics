@@ -49,6 +49,7 @@ import {
   parseRoomFromUrl,
   pushRoomStateDebounced,
   pushRoomStateImmediate,
+  ServerPersistenceMode,
   ServerSyncData,
   setStoredCoachToken,
   subscribeToRoomUpdates,
@@ -61,6 +62,7 @@ import {
   ArrowRight,
   ShieldCheck,
   RefreshCw,
+  AlertTriangle,
 } from 'lucide-react';
 import { playClickSound, triggerHaptic } from './services/tts';
 
@@ -146,6 +148,10 @@ export default function App() {
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [isLoading, setIsLoading] = useState<boolean>(() => Boolean(initialUrlRef.current.roomId));
 
+  const [serverPersistence, setServerPersistence] = useState<ServerPersistenceMode | null>(null);
+  const [dismissedPersistenceBanner, setDismissedPersistenceBanner] = useState(false);
+  const pendingCreatedStateRef = useRef<{ roomId: string; state: ServerSyncData } | null>(null);
+
   const lastLocalWriteAtRef = useRef<number>(0);
   const syncFingerprintsRef = useRef({
     club: '',
@@ -176,12 +182,31 @@ export default function App() {
 
   // Enter a specific room from RoomLobby or deep-link
   const handleEnterRoom = useCallback(
-    (nextRoomId: string, nextCoachToken: string | null, justCreated = false) => {
+    (
+      nextRoomId: string,
+      nextCoachToken: string | null,
+      justCreated = false,
+      initialState?: ServerSyncData,
+      persistence?: ServerPersistenceMode
+    ) => {
       const normalizedRoomId = nextRoomId.trim().toLowerCase();
       setRoomLoadError(null);
       setLobbyParentMode(false);
       setCurrentRoomId(normalizedRoomId);
       syncFingerprintsRef.current = { club: '', players: '', matches: '', activeMatch: '' };
+
+      if (initialState) {
+        pendingCreatedStateRef.current = { roomId: normalizedRoomId, state: initialState };
+      } else {
+        pendingCreatedStateRef.current = null;
+      }
+
+      if (persistence) {
+        setServerPersistence(persistence);
+        if (persistence === 'ephemeral-tmp') {
+          setDismissedPersistenceBanner(false);
+        }
+      }
 
       if (nextCoachToken) {
         setStoredCoachToken(normalizedRoomId, nextCoachToken);
@@ -206,6 +231,8 @@ export default function App() {
   const handleExitRoom = useCallback(() => {
     playClickSound();
     triggerHaptic(25);
+    pendingCreatedStateRef.current = null;
+    setServerPersistence(null);
     setCurrentRoomId(null);
     setRoomId(null);
     setCoachToken(null);
@@ -385,7 +412,17 @@ export default function App() {
 
         if (cancelled) return;
 
-        if (roomRes.status === 404) {
+        const pendingCreated =
+          pendingCreatedStateRef.current?.roomId === roomId
+            ? pendingCreatedStateRef.current.state
+            : null;
+        pendingCreatedStateRef.current = null;
+
+        const hasLocalCoachBackup =
+          Boolean(effectiveToken) &&
+          (Boolean(pendingCreated) || loadedPlayers.length > 0 || loadedMatches.length > 0);
+
+        if (roomRes.status === 404 && !hasLocalCoachBackup) {
           setCurrentRoomId(null);
           clearStoredCoachToken(roomId);
           setRoomId(null);
@@ -396,7 +433,11 @@ export default function App() {
           return;
         }
 
-        const serverData = roomRes.data;
+        if (roomRes.status === 404 && hasLocalCoachBackup) {
+          setServerPersistence('ephemeral-tmp');
+        }
+
+        const serverData = roomRes.data || pendingCreated;
         const explicitSpectator =
           typeof window !== 'undefined' &&
           (() => {
@@ -1093,6 +1134,23 @@ export default function App() {
         onOpenTransferModal={() => setIsTransferModalOpen(true)}
         onOpenTeamExportImport={!isReadOnlyViewer ? handleOpenTeamExportImport : undefined}
       />
+
+      {!isReadOnlyViewer && serverPersistence === 'ephemeral-tmp' && !dismissedPersistenceBanner && (
+        <div className="bg-amber-950/70 border-b border-amber-500/40 px-4 py-2.5 text-xs text-amber-200 flex items-center justify-between gap-3">
+          <div className="flex items-center gap-2 max-w-5xl mx-auto">
+            <AlertTriangle className="w-4 h-4 text-amber-400 shrink-0" />
+            <span>
+              <strong>Brak trwałej bazy danych na Vercel:</strong> pokój działa lokalnie w tej przeglądarce, ale bez podłączonej bazy (<strong>Neon Postgres</strong> lub <strong>Upstash Redis</strong> w zakładce <em>Storage</em> na Vercel + Redeploy) link nie zadziała na telefonach rodziców.
+            </span>
+          </div>
+          <button
+            onClick={() => setDismissedPersistenceBanner(true)}
+            className="text-amber-300 hover:text-white font-bold px-2 py-0.5 rounded shrink-0"
+          >
+            Ukryj
+          </button>
+        </div>
+      )}
 
       {/* Main Container */}
       <main className="flex-1 flex flex-col">

@@ -104,19 +104,38 @@ function createDefaultClubProfile(overrides: Partial<ServerClubProfile> = {}): S
 
 const isVercelEnv = Boolean(process.env.VERCEL);
 
+function findEnvValue(exactKeys: string[], suffixPatterns: string[]): string | null {
+  for (const key of exactKeys) {
+    const val = (process.env[key] || '').trim();
+    if (val) return val;
+  }
+  for (const [key, rawVal] of Object.entries(process.env)) {
+    if (!rawVal || !rawVal.trim()) continue;
+    for (const suffix of suffixPatterns) {
+      if (key.endsWith(suffix)) {
+        return rawVal.trim();
+      }
+    }
+  }
+  return null;
+}
+
 function getPostgresConnectionString(): string | null {
-  const url = (
-    process.env.POSTGRES_URL ||
-    process.env.POSTGRES_PRISMA_URL ||
-    process.env.DATABASE_URL ||
-    ''
-  ).trim();
-  return url || null;
+  return findEnvValue(
+    ['POSTGRES_URL', 'POSTGRES_PRISMA_URL', 'POSTGRES_URL_NON_POOLING', 'DATABASE_URL'],
+    ['_POSTGRES_URL', '_POSTGRES_PRISMA_URL', '_DATABASE_URL']
+  );
 }
 
 function getRedisRestConfig(): { url: string; token: string } | null {
-  const url = (process.env.KV_REST_API_URL || process.env.UPSTASH_REDIS_REST_URL || '').trim();
-  const token = (process.env.KV_REST_API_TOKEN || process.env.UPSTASH_REDIS_REST_TOKEN || '').trim();
+  const url = findEnvValue(
+    ['KV_REST_API_URL', 'UPSTASH_REDIS_REST_URL'],
+    ['_KV_REST_API_URL', '_UPSTASH_REDIS_REST_URL']
+  );
+  const token = findEnvValue(
+    ['KV_REST_API_TOKEN', 'UPSTASH_REDIS_REST_TOKEN'],
+    ['_KV_REST_API_TOKEN', '_UPSTASH_REDIS_REST_TOKEN']
+  );
   if (url && token) {
     return { url: url.replace(/\/+$/, ''), token };
   }
@@ -245,29 +264,39 @@ function normalizeLoadedRoom(parsed: ServerRoomState): ServerRoomState | null {
   return parsed;
 }
 
-export async function saveRoom(room: ServerRoomState): Promise<void> {
+export async function saveRoom(room: ServerRoomState, throwOnDbError = false): Promise<void> {
   roomsCache.set(room.roomId, room);
 
   // 1. PostgreSQL (Neon / Supabase / Vercel Postgres)
-  const pool = await getPgPool();
-  if (pool) {
-    try {
-      await pool.query(
-        `INSERT INTO basketstats_rooms (room_id, data, updated_at)
-         VALUES ($1, $2::jsonb, $3)
-         ON CONFLICT (room_id)
-         DO UPDATE SET data = EXCLUDED.data, updated_at = EXCLUDED.updated_at`,
-        [room.roomId, JSON.stringify(room), room.lastUpdated || Date.now()]
-      );
-    } catch (err) {
-      console.error(`Failed to save room ${room.roomId} to PostgreSQL:`, err);
+  const connStr = getPostgresConnectionString();
+  if (connStr) {
+    const pool = await getPgPool();
+    if (!pool) {
+      const errMsg = 'Nie udało się połączyć z bazą PostgreSQL.';
+      if (throwOnDbError) throw new Error(errMsg);
+    } else {
+      try {
+        await pool.query(
+          `INSERT INTO basketstats_rooms (room_id, data, updated_at)
+           VALUES ($1, $2::jsonb, $3)
+           ON CONFLICT (room_id)
+           DO UPDATE SET data = EXCLUDED.data, updated_at = EXCLUDED.updated_at`,
+          [room.roomId, JSON.stringify(room), room.lastUpdated || Date.now()]
+        );
+      } catch (err) {
+        console.error(`Failed to save room ${room.roomId} to PostgreSQL:`, err);
+        if (throwOnDbError) throw err;
+      }
     }
   }
 
   // 2. Upstash Redis / Vercel KV REST
   const redisCfg = getRedisRestConfig();
   if (redisCfg) {
-    await redisCommand(['SET', getRedisRoomKey(room.roomId), JSON.stringify(room)]);
+    const res = await redisCommand(['SET', getRedisRoomKey(room.roomId), JSON.stringify(room)]);
+    if (res === null && throwOnDbError) {
+      throw new Error('Nie udało się zapisać pokoju w bazie Redis.');
+    }
   }
 
   // 3. Disk / tmp fallback
@@ -277,7 +306,7 @@ export async function saveRoom(room: ServerRoomState): Promise<void> {
     }
     fs.writeFileSync(getRoomFilePath(room.roomId), JSON.stringify(room, null, 2), 'utf-8');
   } catch (err) {
-    if (!pool && !redisCfg) {
+    if (!connStr && !redisCfg) {
       console.error(`Failed to persist room ${room.roomId}:`, err);
     }
   }
@@ -528,7 +557,7 @@ export function createApiApp(options: CreateApiAppOptions = {}): Express {
         lastUpdated: now,
       };
 
-      await saveRoom(room);
+      await saveRoom(room, true);
 
       res.status(201).json({
         success: true,
@@ -981,12 +1010,40 @@ Zwróć TYLKO poprawny JSON (bez markdown) w formacie:
   });
 
   // Health check
-  app.get('/api/health', (_req: Request, res: Response) => {
+  app.get('/api/health', async (_req: Request, res: Response) => {
     res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+    const persistence = getPersistenceMode();
+    let dbReachable = persistence === 'disk' || persistence === 'ephemeral-tmp';
+    let dbError: string | undefined;
+
+    if (persistence === 'postgres') {
+      try {
+        const pool = await getPgPool();
+        if (pool) {
+          await pool.query('SELECT 1');
+          dbReachable = true;
+        } else {
+          dbReachable = false;
+          dbError = 'PostgreSQL pool initialization failed';
+        }
+      } catch (err) {
+        dbReachable = false;
+        dbError = err instanceof Error ? err.message : 'PostgreSQL connection error';
+      }
+    } else if (persistence === 'redis') {
+      const pong = await redisCommand(['PING']);
+      dbReachable = pong !== null;
+      if (!dbReachable) {
+        dbError = 'Redis REST PING failed';
+      }
+    }
+
     res.json({
       status: 'ok',
       service: 'BasketStats Pro Multi-Room API',
-      persistence: getPersistenceMode(),
+      persistence,
+      dbReachable,
+      ...(dbError ? { dbError } : {}),
       supportsWebSocket,
     });
   });

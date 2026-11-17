@@ -5,6 +5,8 @@ import {
   checkRoomExists,
   createRoomOnServer,
   extractRoomFromInput,
+  ServerPersistenceMode,
+  ServerSyncData,
   setStoredCoachToken,
 } from '../services/syncService';
 import { getRecentRooms, removeRecentRoom, saveRecentRoom } from '../services/db';
@@ -29,7 +31,13 @@ import {
 } from 'lucide-react';
 
 interface RoomLobbyProps {
-  onEnterRoom: (roomId: string, coachToken: string | null, justCreated?: boolean) => void;
+  onEnterRoom: (
+    roomId: string,
+    coachToken: string | null,
+    justCreated?: boolean,
+    initialState?: ServerSyncData,
+    persistence?: ServerPersistenceMode
+  ) => void;
   onOpenParentMode?: () => void;
   initialError?: string | null;
 }
@@ -116,7 +124,7 @@ export const RoomLobby: React.FC<RoomLobbyProps> = ({
         lastVisited: Date.now(),
       });
 
-      onEnterRoom(result.roomId, result.coachToken, true);
+      onEnterRoom(result.roomId, result.coachToken, true, result.state, result.persistence);
     } finally {
       setIsCreating(false);
     }

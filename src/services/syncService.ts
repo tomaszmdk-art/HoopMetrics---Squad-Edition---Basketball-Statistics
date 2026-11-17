@@ -42,11 +42,13 @@ export interface CreateRoomPayload {
   customRoomId?: string;
 }
 
+export type ServerPersistenceMode = 'postgres' | 'redis' | 'ephemeral-tmp' | 'disk';
+
 export interface CreateRoomResult {
   success: boolean;
   roomId?: string;
   coachToken?: string;
-  persistence?: 'redis' | 'ephemeral-tmp' | 'disk';
+  persistence?: ServerPersistenceMode;
   state?: ServerSyncData;
   error?: string;
 }
