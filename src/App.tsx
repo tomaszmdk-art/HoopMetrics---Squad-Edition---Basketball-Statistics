@@ -447,7 +447,17 @@ export default function App() {
         }
 
         if (roomRes.status === 404 && hasLocalCoachBackup) {
-          setServerPersistence('ephemeral-tmp');
+          fetch('/api/health', { cache: 'no-store' })
+            .then((r) => (r.ok ? r.json() : null))
+            .then((h) => {
+              if (!cancelled && h?.persistence) {
+                setServerPersistence(h.persistence);
+                if (Array.isArray(h.detectedDbEnvKeys)) {
+                  setDetectedDbKeys(h.detectedDbEnvKeys);
+                }
+              }
+            })
+            .catch(() => {});
         }
 
         const serverData = roomRes.data || pendingCreated;
