@@ -46,6 +46,7 @@ export interface CreateRoomResult {
   success: boolean;
   roomId?: string;
   coachToken?: string;
+  persistence?: 'redis' | 'ephemeral-tmp' | 'disk';
   state?: ServerSyncData;
   error?: string;
 }
@@ -245,6 +246,13 @@ export async function createRoomOnServer(payload: CreateRoomPayload): Promise<Cr
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload),
     });
+    const contentType = res.headers.get('content-type') || '';
+    if (!contentType.includes('application/json')) {
+      return {
+        success: false,
+        error: `Serwer API nie zwrócił odpowiedzi JSON (HTTP ${res.status}). Upewnij się, że backend /api działa poprawnie.`,
+      };
+    }
     const data = await res.json();
     if (!res.ok || !data.success) {
       return { success: false, error: data.error || 'Nie udało się utworzyć pokoju drużyny.' };
@@ -253,6 +261,7 @@ export async function createRoomOnServer(payload: CreateRoomPayload): Promise<Cr
       success: true,
       roomId: data.roomId,
       coachToken: data.coachToken,
+      persistence: data.persistence,
       state: data.state,
     };
   } catch {
@@ -293,6 +302,10 @@ export async function authenticateRoomCoach(
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(credentials),
     });
+    const contentType = res.headers.get('content-type') || '';
+    if (!contentType.includes('application/json')) {
+      return { authenticated: false, error: 'Błąd odpowiedzi serwera API.' };
+    }
     const data = await res.json();
     if (!res.ok || !data.authenticated) {
       return { authenticated: false, error: data.error || 'Nieprawidłowy kod PIN.' };
@@ -418,6 +431,7 @@ export function subscribeToRoomUpdates(
 
   let ws: WebSocket | null = null;
   let closedByCaller = false;
+  let hasConnectedOnce = false;
   let reconnectAttempts = 0;
   let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   let pingInterval: ReturnType<typeof setInterval> | null = null;
@@ -449,6 +463,7 @@ export function subscribeToRoomUpdates(
     }
 
     ws.onopen = () => {
+      hasConnectedOnce = true;
       reconnectAttempts = 0;
       onStatusChange?.('connected');
       pingInterval = setInterval(() => {
@@ -495,7 +510,22 @@ export function subscribeToRoomUpdates(
     reconnectTimer = setTimeout(connect, delay);
   };
 
-  connect();
+  // Check if backend supports WebSocket (serverless environments like Vercel use REST polling instead)
+  fetch('/api/health', { cache: 'no-store' })
+    .then((res) => (res.ok ? res.json() : null))
+    .then((health) => {
+      if (closedByCaller) return;
+      if (health && health.supportsWebSocket === false) {
+        onStatusChange?.('disconnected');
+        return;
+      }
+      connect();
+    })
+    .catch(() => {
+      if (!closedByCaller && !hasConnectedOnce) {
+        connect();
+      }
+    });
 
   return () => {
     closedByCaller = true;
