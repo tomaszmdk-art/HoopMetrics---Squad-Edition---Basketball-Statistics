@@ -6,6 +6,7 @@ import {
   Match,
   MatchEvent,
   Player,
+  PlayerCareerAverages,
   PlayerMatchStats,
 } from '../types/basketball';
 import { calculatePlayerStats, calculateTeamStats } from './statsCalculator';
@@ -1018,10 +1019,189 @@ export async function exportPlayByPlayPdf(
   });
 }
 
+// 4. Export Season Averages Summary PDF (anonymized or with full names)
+export async function exportSeasonStatsPdf(
+  seasonAverages: PlayerCareerAverages[],
+  matchesCount: number,
+  options: {
+    seasonLabel?: string;
+    includePersonalData?: boolean;
+    summary?: {
+      wins: number;
+      losses: number;
+      ties: number;
+      winRate: number;
+      ppgScored: string;
+      ppgConceded: string;
+    };
+  } = {}
+) {
+  const allowPii = Boolean(options.includePersonalData);
+  const doc = await preparePdfDocument('landscape');
+  const fontName = cachedRegularFontBase64 ? 'LiberationSans' : 'helvetica';
+  const pageWidth = doc.internal.pageSize.getWidth();
+  const pageHeight = doc.internal.pageSize.getHeight();
+
+  const clubProfile = await getClubProfile();
+  const clubName = (clubProfile.name || 'Moja Drużyna Koszykarska').toUpperCase();
+  const seasonLabel = options.seasonLabel && options.seasonLabel !== 'all'
+    ? options.seasonLabel
+    : (clubProfile.season || 'Wszystkie sezony');
+
+  doc.setFillColor(10, 25, 47);
+  doc.rect(0, 0, pageWidth, 28, 'F');
+
+  doc.setFont(fontName, 'bold');
+  doc.setFontSize(16);
+  doc.setTextColor(245, 158, 11);
+  doc.text(clubName, 14, 11);
+
+  doc.setFontSize(10);
+  doc.setTextColor(226, 232, 240);
+  doc.text(
+    `RAPORT STATYSTYK SEZONOWYCH (${allowPii ? 'PEŁNY' : 'ZANONIMIZOWANY'})`,
+    14,
+    18
+  );
+
+  doc.setFont(fontName, 'normal');
+  doc.setFontSize(8.5);
+  doc.setTextColor(148, 163, 184);
+  doc.text(
+    `Zakres: ${seasonLabel}   |   Rozegrane mecze: ${matchesCount}   |   Tryb: ${allowPii ? 'Pełne dane zawodników' : 'Tylko numery na koszulkach'}`,
+    14,
+    24
+  );
+
+  if (options.summary) {
+    doc.setFont(fontName, 'bold');
+    doc.setFontSize(11);
+    doc.setTextColor(255, 255, 255);
+    doc.text(
+      `BILANS: ${options.summary.wins}W – ${options.summary.losses}L${options.summary.ties > 0 ? ` (${options.summary.ties}R)` : ''} (${options.summary.winRate}%)`,
+      pageWidth - 14,
+      13,
+      { align: 'right' }
+    );
+    doc.setFont(fontName, 'normal');
+    doc.setFontSize(8.5);
+    doc.setTextColor(203, 213, 225);
+    doc.text(
+      `Śr. zdobyte: ${options.summary.ppgScored} pkt/mecz   |   Śr. stracone: ${options.summary.ppgConceded} pkt/mecz`,
+      pageWidth - 14,
+      20,
+      { align: 'right' }
+    );
+  }
+
+  const headers = [
+    'Nr',
+    'Zawodnik',
+    'Mecze',
+    'PPG',
+    'Suma PTS',
+    'RPG',
+    'Suma ZB',
+    'APG',
+    'Suma AST',
+    'SPG',
+    'BPG',
+    'FG %',
+    'FT %',
+    'Śr. EVAL',
+    'Rekord',
+  ];
+
+  const rows = seasonAverages.map((p) => [
+    `#${p.playerNumber}`,
+    allowPii ? p.playerName : `Zawodnik #${p.playerNumber}`,
+    p.gamesPlayed,
+    p.ppg,
+    p.totalPts,
+    p.rpg,
+    p.totalReb,
+    p.apg,
+    p.totalAst,
+    p.spg,
+    p.bpg,
+    `${p.fgPct}%`,
+    `${p.ftPct}%`,
+    p.evalAvg,
+    `${p.highScore} pkt`,
+  ]);
+
+  autoTable(doc, {
+    startY: 34,
+    head: [headers],
+    body: rows,
+    theme: 'grid',
+    styles: {
+      font: fontName,
+      fontSize: 7.5,
+      cellPadding: 1.5,
+      textColor: [15, 23, 42],
+      lineColor: [203, 213, 225],
+      lineWidth: 0.1,
+      valign: 'middle',
+    },
+    headStyles: {
+      font: fontName,
+      fontStyle: 'bold',
+      fillColor: [15, 23, 42],
+      textColor: [255, 255, 255],
+      halign: 'center',
+      fontSize: 7.5,
+    },
+    columnStyles: {
+      0: { halign: 'center', fontStyle: 'bold', cellWidth: 12 },
+      1: { halign: 'left', fontStyle: 'bold', cellWidth: 42 },
+      2: { halign: 'center' },
+      3: { halign: 'center', fontStyle: 'bold', textColor: [180, 83, 9] },
+      4: { halign: 'center' },
+      5: { halign: 'center', textColor: [37, 99, 235] },
+      6: { halign: 'center' },
+      7: { halign: 'center', textColor: [2, 132, 199] },
+      8: { halign: 'center' },
+      9: { halign: 'center' },
+      10: { halign: 'center' },
+      11: { halign: 'center' },
+      12: { halign: 'center' },
+      13: { halign: 'center', fontStyle: 'bold', textColor: [5, 150, 105] },
+      14: { halign: 'center', fontStyle: 'bold', textColor: [180, 83, 9] },
+    },
+    margin: { left: 14, right: 14, bottom: 14 },
+  });
+
+  const totalPages = doc.getNumberOfPages();
+  const dateGenerated = new Date().toLocaleString('pl-PL');
+  for (let i = 1; i <= totalPages; i++) {
+    doc.setPage(i);
+    doc.setFont(fontName, 'normal');
+    doc.setFontSize(7.5);
+    doc.setTextColor(148, 163, 184);
+    doc.text(
+      `${clubProfile.name} • Statystyki sezonowe • Wygenerowano: ${dateGenerated}`,
+      14,
+      pageHeight - 6
+    );
+    doc.text(`Strona ${i} z ${totalPages}`, pageWidth - 14, pageHeight - 6, { align: 'right' });
+  }
+
+  const cleanClub = (clubProfile.shortName || clubProfile.name || 'Druzyna').replace(/[^a-zA-Z0-9ąćęłńóśźżĄĆĘŁŃÓŚŹŻ_-]/g, '_');
+  const cleanSeason = seasonLabel.replace(/[^a-zA-Z0-9_-]/g, '_');
+  const privacyTag = allowPii ? 'Pelny' : 'Zanonimizowany';
+  doc.save(`${cleanClub}_Srednie_${cleanSeason}_${privacyTag}.pdf`);
+}
+
 // ==========================================
-// 4. Export Child Match Card / Performance Report
+// 5. Export Child Match Card / Performance Report
 // ==========================================
-export async function exportChildMatchPdf(record: ChildMatchRecord, child: ChildProfile) {
+export async function exportChildMatchPdf(
+  record: ChildMatchRecord,
+  child: ChildProfile,
+  options: { includePersonalData?: boolean } = { includePersonalData: false }
+) {
+  const allowPii = Boolean(options.includePersonalData);
   // Portrait A4 certificate/stat-sheet
   const doc = await preparePdfDocument('portrait');
   const pageWidth = doc.internal.pageSize.getWidth();
@@ -1042,7 +1222,11 @@ export async function exportChildMatchPdf(record: ChildMatchRecord, child: Child
 
   doc.setFontSize(10);
   doc.setTextColor(203, 213, 225); // slate-300
-  doc.text(`RAPORT RODZICA • KOSZYKÓWKA MŁODZIEŻOWA • STATYSTYKI INDYWIDUALNE`, 14, 26);
+  doc.text(
+    `RAPORT RODZICA • ${allowPii ? 'WERSJA PEŁNA' : 'WERSJA ZANONIMIZOWANA'} • STATYSTYKI INDYWIDUALNE`,
+    14,
+    26
+  );
 
   doc.setFontSize(9);
   doc.setTextColor(148, 163, 184); // slate-400
@@ -1057,11 +1241,16 @@ export async function exportChildMatchPdf(record: ChildMatchRecord, child: Child
   // Player Name & Number
   doc.setTextColor(15, 23, 42);
   doc.setFontSize(16);
-  doc.text(`#${record.childNumber} ${record.childName}`, 20, 62);
+  doc.text(
+    allowPii ? `#${record.childNumber} ${record.childName}` : `Zawodnik #${record.childNumber}`,
+    20,
+    62
+  );
 
   doc.setFontSize(10);
   doc.setTextColor(71, 85, 105);
-  doc.text(`Klub: ${record.childClub}  •  Kategoria: ${record.childCategory}  •  Rocznik: ${child.birthYear || 'Młodzieżowy'}`, 20, 70);
+  const birthInfo = allowPii ? `  •  Rocznik: ${child.birthYear || 'Młodzieżowy'}` : '';
+  doc.text(`Klub: ${record.childClub}  •  Kategoria: ${record.childCategory}${birthInfo}`, 20, 70);
   doc.text(`Pozycja: ${child.position || 'Zawodnik'}  •  Mecz: ${record.location === 'Dom' ? 'U siebie' : 'Wyjazd'} vs ${record.opponent}`, 20, 77);
 
   if (record.finalTeamScoreOur !== undefined && record.finalTeamScoreOpp !== undefined) {
@@ -1206,7 +1395,9 @@ export async function exportChildMatchPdf(record: ChildMatchRecord, child: Child
   doc.setTextColor(148, 163, 184);
   doc.text('BasketStats Pro • Dedykowany moduł statystyk dla rodziców młodych koszykarzy', 14, pageHeight - 8);
 
-  const cleanChildName = record.childName.replace(/[^a-zA-Z0-9ąćęłńóśźżĄĆĘŁŃÓŚŹŻ_-]/g, '_');
+  const cleanChildName = allowPii
+    ? record.childName.replace(/[^a-zA-Z0-9ąćęłńóśźżĄĆĘŁŃÓŚŹŻ_-]/g, '_')
+    : `Zawodnik_${record.childNumber}`;
   const cleanOpponent = record.opponent.replace(/[^a-zA-Z0-9ąćęłńóśźżĄĆĘŁŃÓŚŹŻ_-]/g, '_');
   doc.save(`Karta_${cleanChildName}_vs_${cleanOpponent}_${record.date}.pdf`);
 }

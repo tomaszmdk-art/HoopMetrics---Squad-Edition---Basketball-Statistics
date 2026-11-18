@@ -2,7 +2,7 @@ import React, { useState, useMemo } from 'react';
 import { ClubProfile, Match, Player, TeamCategory, DEFAULT_SEASONS, getMatchSeason } from '../types/basketball';
 import { calculateSeasonAverages } from '../services/statsCalculator';
 import { exportSeasonStatsCsv, exportMatchBoxScoreCsv } from '../services/exportCsv';
-import { exportMatchPdf } from '../services/exportPdf';
+import { exportMatchPdf, exportSeasonStatsPdf } from '../services/exportPdf';
 import { BoxScoreTable } from './BoxScoreTable';
 import { PlayByPlayModal } from './PlayByPlayModal';
 import {
@@ -14,7 +14,6 @@ import {
   Eye,
   BarChart2,
   GitCompare,
-  TrendingUp,
   X,
   PlayCircle,
   AlertTriangle,
@@ -25,9 +24,10 @@ import {
   ArrowUpDown,
   Edit3,
   Mail,
-  Filter,
-  CheckCircle2,
   Layers,
+  Shield,
+  UserCheck,
+  Loader2,
 } from 'lucide-react';
 import { playClickSound, triggerHaptic } from '../services/tts';
 import { getPlayerFullName, hasAnyPersonalData } from '../services/playerDisplay';
@@ -44,6 +44,7 @@ interface MatchHistoryProps {
   onDeleteMatch?: (id: string) => Promise<void>;
   readOnly?: boolean;
   onGoToLive?: () => void;
+  onGoToRoster?: () => void;
   onOpenTransferModal?: () => void;
   onOpenTeamExport?: () => void;
 }
@@ -56,6 +57,7 @@ export const MatchHistory: React.FC<MatchHistoryProps> = ({
   onDeleteMatch,
   readOnly = false,
   onGoToLive,
+  onGoToRoster,
   onOpenTransferModal,
   onOpenTeamExport,
 }) => {
@@ -74,10 +76,20 @@ export const MatchHistory: React.FC<MatchHistoryProps> = ({
   const [comparePlayer1Id, setComparePlayer1Id] = useState<string>('');
   const [comparePlayer2Id, setComparePlayer2Id] = useState<string>('');
   const [includePersonalData, setIncludePersonalData] = useState<boolean>(false);
+  const [isExportingSeasonPdf, setIsExportingSeasonPdf] = useState<boolean>(false);
 
   const teamMatches = matches;
   const teamPlayers = players;
   const hasPii = useMemo(() => hasAnyPersonalData(players), [players]);
+
+  const getRosterForMatch = (match: Match): Player[] => {
+    const matched = players.filter(
+      (p) =>
+        match.rosterPlayerIds?.includes(p.id) ||
+        match.events?.some((e) => e.playerId === p.id)
+    );
+    return matched.length > 0 ? matched : players;
+  };
 
   // Extract all unique seasons present in matches + DEFAULT_SEASONS
   const availableSeasons = useMemo(() => {
@@ -292,22 +304,82 @@ export const MatchHistory: React.FC<MatchHistoryProps> = ({
         </div>
       </div>
 
+      {/* Report Privacy Mode Selector (Matches & Season Averages) */}
+      {(activeTab === 'matches' || activeTab === 'averages') && (
+        <div className="bg-slate-900 border border-slate-800 rounded-2xl p-3 sm:p-4 shadow-lg space-y-2">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5">
+            <div className="flex items-center gap-2">
+              <Shield className="w-4 h-4 text-emerald-400 shrink-0" />
+              <div>
+                <div className="text-xs font-bold text-white">
+                  Tryb raportów PDF i CSV (ochrona danych RODO)
+                </div>
+                <div className="text-[11px] text-slate-400">
+                  {!includePersonalData
+                    ? 'Domyślnie eksport zawiera wyłącznie numery na koszulkach (Zawodnik #nr), bez imion i zdjęć.'
+                    : hasPii
+                    ? 'Eksport użyje lokalnie zapisanych na tym urządzeniu imion, nazwisk oraz zdjęć.'
+                    : 'Wybrano raport pełny — uzupełnij imiona/zdjęcia w zakładce Kadra, aby pojawiły się w pliku.'}
+                </div>
+              </div>
+            </div>
+
+            <div className="inline-flex items-center gap-1 p-1 rounded-xl bg-slate-950 border border-slate-800 shrink-0 self-start sm:self-center">
+              <button
+                type="button"
+                onClick={() => {
+                  playClickSound();
+                  setIncludePersonalData(false);
+                }}
+                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition ${
+                  !includePersonalData
+                    ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 shadow-sm'
+                    : 'text-slate-400 hover:text-slate-200 border border-transparent'
+                }`}
+              >
+                <Shield className="w-3.5 h-3.5" />
+                <span>Zanonimizowany (tylko numery)</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  playClickSound();
+                  setIncludePersonalData(true);
+                }}
+                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition ${
+                  includePersonalData
+                    ? 'bg-amber-500/20 text-amber-300 border border-amber-500/40 shadow-sm'
+                    : 'text-slate-400 hover:text-slate-200 border border-transparent'
+                }`}
+              >
+                <UserCheck className="w-3.5 h-3.5" />
+                <span>Pełny (imiona, nazwiska, zdjęcia)</span>
+              </button>
+            </div>
+          </div>
+
+          {includePersonalData && !hasPii && (
+            <div className="p-2.5 rounded-xl bg-amber-500/10 border border-amber-500/30 flex items-center justify-between gap-2 flex-wrap text-[11px] text-amber-200">
+              <span>
+                Na tym urządzeniu nie wpisano jeszcze imion ani nazwisk drużyny — dopóki ich nie uzupełnisz, raport pokaże tylko numery koszulek.
+              </span>
+              {onGoToRoster && (
+                <button
+                  type="button"
+                  onClick={onGoToRoster}
+                  className="px-2.5 py-1 rounded-lg bg-amber-500 hover:bg-amber-400 text-slate-950 font-black text-[11px] transition shrink-0"
+                >
+                  Uzupełnij w Kadra →
+                </button>
+              )}
+            </div>
+          )}
+        </div>
+      )}
+
       {/* TAB 1: LISTA MECZÓW */}
       {activeTab === 'matches' && (
         <div className="space-y-4">
-          {hasPii && (
-            <label className="flex items-center gap-2.5 px-3.5 py-2.5 rounded-xl bg-slate-900 border border-slate-800 cursor-pointer select-none text-xs text-slate-300 hover:border-slate-700 transition">
-              <input
-                type="checkbox"
-                checked={includePersonalData}
-                onChange={(e) => setIncludePersonalData(e.target.checked)}
-                className="w-4 h-4 accent-amber-500 rounded cursor-pointer"
-              />
-              <span>
-                Dołącz dane osobowe do PDF/CSV (imiona, nazwiska, zdjęcia) — domyślnie eksport zawiera tylko numery
-              </span>
-            </label>
-          )}
           {/* Season & Sorting Filter Bar */}
           <div className="bg-slate-900 border border-slate-800 rounded-2xl p-3 sm:p-4 space-y-3 shadow-lg">
             <div className="flex flex-col md:flex-row md:items-center justify-between gap-3">
@@ -592,11 +664,7 @@ export const MatchHistory: React.FC<MatchHistoryProps> = ({
 
                       <button
                         onClick={() => {
-                          const roster =
-                            match.rosterPlayerIds && match.rosterPlayerIds.length > 0
-                              ? players.filter((p) => match.rosterPlayerIds.includes(p.id))
-                              : players;
-                          exportMatchPdf(match, roster, {
+                          exportMatchPdf(match, getRosterForMatch(match), {
                             includeBoxScore: true,
                             includePlayByPlay: true,
                             includePlayerPages: true,
@@ -613,7 +681,7 @@ export const MatchHistory: React.FC<MatchHistoryProps> = ({
                         onClick={() =>
                           exportMatchBoxScoreCsv(
                             match,
-                            players.filter((p) => match.rosterPlayerIds.includes(p.id)),
+                            getRosterForMatch(match),
                             clubProfile?.name,
                             includePersonalData
                           )
@@ -649,29 +717,57 @@ export const MatchHistory: React.FC<MatchHistoryProps> = ({
           <div className="flex items-center justify-between gap-2 bg-slate-900/60 p-3 rounded-xl border border-slate-800 flex-wrap">
             <div className="flex items-center gap-3 flex-wrap">
               <span className="text-xs font-semibold text-slate-300">
-                Podsumowanie występów drużyny ({seasonFilteredMatches.length} meczów)
+                Podsumowanie występów drużyny ({seasonFilteredMatches.length} meczów • {selectedSeason === 'all' ? 'Wszystkie sezony' : selectedSeason})
               </span>
-              {hasPii && (
-                <label className="flex items-center gap-2 cursor-pointer select-none text-xs text-slate-300">
-                  <input
-                    type="checkbox"
-                    checked={includePersonalData}
-                    onChange={(e) => setIncludePersonalData(e.target.checked)}
-                    className="w-4 h-4 accent-amber-500 rounded cursor-pointer"
-                  />
-                  <span>Dołącz imiona i nazwiska do CSV</span>
-                </label>
-              )}
             </div>
-            <button
-              onClick={() =>
-                exportSeasonStatsCsv('', seasonAverages, seasonFilteredMatches.length, clubProfile?.name, includePersonalData)
-              }
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-amber-500 hover:bg-amber-400 text-slate-950 text-xs font-bold transition active:scale-95 shadow-sm"
-            >
-              <Download className="w-3.5 h-3.5" />
-              <span>Eksportuj średnie CSV</span>
-            </button>
+            <div className="flex items-center gap-2 flex-wrap">
+              <button
+                type="button"
+                disabled={isExportingSeasonPdf || sortedSeasonAverages.length === 0}
+                onClick={async () => {
+                  setIsExportingSeasonPdf(true);
+                  playClickSound();
+                  triggerHaptic(30);
+                  try {
+                    await exportSeasonStatsPdf(sortedSeasonAverages, seasonFilteredMatches.length, {
+                      seasonLabel: selectedSeason === 'all' ? 'Wszystkie sezony' : selectedSeason,
+                      includePersonalData,
+                      summary: {
+                        wins: seasonWins,
+                        losses: seasonLosses,
+                        ties: seasonTies,
+                        winRate,
+                        ppgScored,
+                        ppgConceded,
+                      },
+                    });
+                  } catch (err) {
+                    console.error('Błąd eksportu średnich sezonu PDF:', err);
+                  } finally {
+                    setIsExportingSeasonPdf(false);
+                  }
+                }}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-amber-500 hover:bg-amber-400 disabled:opacity-50 text-slate-950 text-xs font-black transition active:scale-95 shadow-sm"
+              >
+                {isExportingSeasonPdf ? (
+                  <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                ) : (
+                  <FileText className="w-3.5 h-3.5" />
+                )}
+                <span>Raport Średnich PDF</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() =>
+                  exportSeasonStatsCsv('', seasonAverages, seasonFilteredMatches.length, clubProfile?.name, includePersonalData)
+                }
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-amber-300 border border-amber-500/30 text-xs font-bold transition active:scale-95 shadow-sm"
+              >
+                <Download className="w-3.5 h-3.5" />
+                <span>Eksportuj średnie CSV</span>
+              </button>
+            </div>
           </div>
 
           {/* Quick Sort Bar for Season Averages */}
@@ -1047,12 +1143,11 @@ export const MatchHistory: React.FC<MatchHistoryProps> = ({
             <div className="flex-1 overflow-y-auto p-3 sm:p-5">
               <BoxScoreTable
                 match={viewingMatch}
-                rosterPlayers={players.filter((p) =>
-                  viewingMatch.rosterPlayerIds?.includes(p.id) ||
-                  viewingMatch.events.some((e) => e.playerId === p.id)
-                )}
+                rosterPlayers={getRosterForMatch(viewingMatch)}
                 isMatchActive={false}
                 clubProfile={clubProfile}
+                defaultIncludePersonalData={includePersonalData}
+                onChangeIncludePersonalData={setIncludePersonalData}
               />
             </div>
           </div>
@@ -1067,6 +1162,8 @@ export const MatchHistory: React.FC<MatchHistoryProps> = ({
           match={viewingPlayByPlay}
           rosterPlayers={players}
           onDeleteEvent={readOnly ? undefined : () => {}}
+          defaultIncludePersonalData={includePersonalData}
+          onChangeIncludePersonalData={setIncludePersonalData}
         />
       )}
 

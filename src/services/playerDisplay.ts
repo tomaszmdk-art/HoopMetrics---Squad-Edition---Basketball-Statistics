@@ -127,7 +127,9 @@ export const mergeServerPlayersWithLocal = (
   serverPlayers: Player[] = [],
   localPlayers: Player[] = []
 ): Player[] => {
-  return serverPlayers.map((sp) => {
+  const matchedLocalIds = new Set<string>();
+
+  const mergedServer = serverPlayers.map((sp) => {
     const spCategory = sp.teamCategory || 'TEAM';
     const localMatch =
       localPlayers.find((lp) => lp.id === sp.id) ||
@@ -143,6 +145,17 @@ export const mergeServerPlayersWithLocal = (
       };
     }
 
+    matchedLocalIds.add(localMatch.id);
+    localPlayers.forEach((lp) => {
+      if (
+        lp.id.startsWith('local-') &&
+        lp.number === sp.number &&
+        (lp.teamCategory || 'TEAM') === spCategory
+      ) {
+        matchedLocalIds.add(lp.id);
+      }
+    });
+
     return {
       ...sp,
       firstName: sp.firstName?.trim() ? sp.firstName : (localMatch.firstName || ''),
@@ -152,6 +165,12 @@ export const mergeServerPlayersWithLocal = (
       position: sp.position || localMatch.position,
     };
   });
+
+  const unmatchedLocalExtras = localPlayers.filter(
+    (lp) => lp.id.startsWith('local-') && !matchedLocalIds.has(lp.id)
+  );
+
+  return [...mergedServer, ...unmatchedLocalExtras].sort((a, b) => a.number - b.number);
 };
 
 export const mergeServerClubWithLocal = (

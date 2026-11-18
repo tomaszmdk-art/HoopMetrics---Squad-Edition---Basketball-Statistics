@@ -75,6 +75,15 @@ function buildActiveMatchFingerprint(m: Match | undefined): string {
   return `${m.id}:${m.updatedAt || 0}:${m.clockSeconds}:${m.isClockRunning}:${m.currentQuarter}:${m.ourScore}:${m.opponentScore}:${m.events?.length || 0}:${m.onCourtPlayerIds?.join(',') || ''}`;
 }
 
+function buildPlayersFingerprint(list: Player[]): string {
+  return `${list.length}:${list
+    .map(
+      (p) =>
+        `${p.id}-${p.number}-${p.firstName || ''}-${p.lastName || ''}-${p.position || ''}-${p.notes || ''}-${p.photo ? p.photo.length : '0'}`
+    )
+    .join(',')}`;
+}
+
 export default function App() {
   const initialUrlRef = useRef(parseRoomFromUrl());
 
@@ -336,9 +345,7 @@ export default function App() {
       // 2. Players (merge server jersey numbers with local names & photos)
       if (Array.isArray(serverData.players)) {
         const mergedPlayers = mergeServerPlayersWithLocal(serverData.players, playersRef.current);
-        const playersFp = `${mergedPlayers.length}:${mergedPlayers
-          .map((p) => `${p.id}-${p.number}-${p.firstName}-${p.lastName}-${p.photo ? '1' : '0'}`)
-          .join(',')}`;
+        const playersFp = buildPlayersFingerprint(mergedPlayers);
         if (playersFp !== syncFingerprintsRef.current.players) {
           syncFingerprintsRef.current.players = playersFp;
           playersRef.current = mergedPlayers;
@@ -579,7 +586,7 @@ export default function App() {
           if (Array.isArray(serverData.players)) {
             if (!isCoachActive) {
               finalPlayers = mergeServerPlayersWithLocal(serverData.players, loadedPlayers);
-              if (finalPlayers.length > 0) {
+              if (finalPlayers.length > 0 || loadedPlayers.length > 0) {
                 await replacePlayersInRoom(finalPlayers).catch(() => {});
               }
             } else if (loadedPlayers.length === 0 && serverData.players.length > 0) {
@@ -629,9 +636,7 @@ export default function App() {
         // Seed fingerprints
         syncFingerprintsRef.current = {
           club: JSON.stringify(finalClub),
-          players: `${finalPlayers.length}:${finalPlayers
-            .map((p) => `${p.id}-${p.number}-${p.firstName}-${p.lastName}-${p.photo ? '1' : '0'}`)
-            .join(',')}`,
+          players: buildPlayersFingerprint(finalPlayers),
           matches: `${finalMatches.length}:${finalMatches
             .map((m) => `${m.id}-${m.updatedAt || 0}-${m.ourScore}-${m.opponentScore}-${m.status}-${m.events?.length || 0}`)
             .join(',')}`,
@@ -949,9 +954,7 @@ export default function App() {
   ) => {
     lastLocalWriteAtRef.current = Date.now();
     playersRef.current = updatedPlayers;
-    syncFingerprintsRef.current.players = `${updatedPlayers.length}:${updatedPlayers
-      .map((p) => `${p.id}-${p.number}-${p.firstName}-${p.lastName}-${p.photo ? '1' : '0'}`)
-      .join(',')}`;
+    syncFingerprintsRef.current.players = buildPlayersFingerprint(updatedPlayers);
     setMatches(updatedMatches);
     setPlayers(updatedPlayers);
     if (updatedClub) {
@@ -966,25 +969,123 @@ export default function App() {
     }
   };
 
-  // Save Player handler
+  // Save Player handler (coach syncs jersey numbers to server; parent/spectator saves strictly locally)
   const handleSavePlayer = async (player: Player) => {
-    if (isReadOnlyViewer) return;
-    const normalized: Player = { ...player, teamCategory: player.teamCategory || 'TEAM' };
+    const currentList = playersRef.current;
+    const category = player.teamCategory || 'TEAM';
+    const existingById = currentList.find((p) => p.id === player.id);
+    const existingByNumber = !existingById
+      ? currentList.find((p) => p.number === player.number && (p.teamCategory || 'TEAM') === category)
+      : undefined;
+
+    let normalized: Player;
+    if (existingByNumber) {
+      normalized = {
+        ...existingByNumber,
+        ...player,
+        id: existingByNumber.id,
+        teamCategory: category,
+        createdAt: existingByNumber.createdAt || player.createdAt || Date.now(),
+      };
+    } else if (isReadOnlyViewer && !existingById) {
+      const safeId = player.id.startsWith('local-')
+        ? player.id
+        : `local-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+      normalized = { ...player, id: safeId, teamCategory: category };
+    } else if (isReadOnlyViewer && existingById && !existingById.id.startsWith('local-')) {
+      normalized = {
+        ...existingById,
+        ...player,
+        id: existingById.id,
+        number: existingById.number,
+        teamCategory: existingById.teamCategory || category,
+      };
+    } else {
+      normalized = { ...player, teamCategory: category };
+    }
+
     lastLocalWriteAtRef.current = Date.now();
     await savePlayer(normalized);
     const nextPlayers = (() => {
-      const idx = players.findIndex((p) => p.id === normalized.id);
+      const idx = currentList.findIndex((p) => p.id === normalized.id);
       if (idx >= 0) {
-        const copy = [...players];
+        const copy = [...currentList];
         copy[idx] = normalized;
         return copy;
       }
-      return [...players, normalized];
+      return [...currentList, normalized];
     })().sort((a, b) => a.number - b.number);
+
     playersRef.current = nextPlayers;
+    syncFingerprintsRef.current.players = buildPlayersFingerprint(nextPlayers);
     setPlayers(nextPlayers);
 
-    if (roomId && coachToken) {
+    if (!isReadOnlyViewer && roomId && coachToken) {
+      pushRoomStateImmediate(roomId, coachToken, {
+        matches,
+        players: nextPlayers,
+        activeMatchId: activeMatch?.id || null,
+        clubProfile,
+      });
+    }
+  };
+
+  // Bulk upsert players (coach syncs jersey numbers; parent/spectator keeps everything strictly local)
+  const handleSavePlayersBulk = async (incomingPlayers: Player[]) => {
+    const currentList = playersRef.current;
+    const mergedMap = new Map<string, Player>();
+    currentList.forEach((p) => mergedMap.set(p.id, p));
+
+    for (const incoming of incomingPlayers) {
+      const category = incoming.teamCategory || 'TEAM';
+      const byId = mergedMap.get(incoming.id);
+      const byNumber = !byId
+        ? Array.from(mergedMap.values()).find(
+            (p) => p.number === incoming.number && (p.teamCategory || 'TEAM') === category
+          )
+        : undefined;
+
+      if (byId) {
+        const keepNumber =
+          isReadOnlyViewer && !byId.id.startsWith('local-') ? byId.number : incoming.number;
+        mergedMap.set(byId.id, {
+          ...byId,
+          ...incoming,
+          id: byId.id,
+          number: keepNumber,
+          teamCategory: byId.teamCategory || category,
+        });
+      } else if (byNumber) {
+        mergedMap.set(byNumber.id, {
+          ...byNumber,
+          ...incoming,
+          id: byNumber.id,
+          number: byNumber.number,
+          teamCategory: byNumber.teamCategory || category,
+        });
+      } else {
+        const nextId = isReadOnlyViewer
+          ? incoming.id.startsWith('local-')
+            ? incoming.id
+            : `local-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`
+          : incoming.id || `player-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+        mergedMap.set(nextId, {
+          ...incoming,
+          id: nextId,
+          teamCategory: category,
+          createdAt: incoming.createdAt || Date.now(),
+        });
+      }
+    }
+
+    const nextPlayers = Array.from(mergedMap.values()).sort((a, b) => a.number - b.number);
+    lastLocalWriteAtRef.current = Date.now();
+    await replacePlayersInRoom(nextPlayers);
+    playersRef.current = nextPlayers;
+    syncFingerprintsRef.current.players = buildPlayersFingerprint(nextPlayers);
+    setPlayers(nextPlayers);
+
+    if (!isReadOnlyViewer && roomId && coachToken) {
       pushRoomStateImmediate(roomId, coachToken, {
         matches,
         players: nextPlayers,
@@ -996,11 +1097,40 @@ export default function App() {
 
   // Delete Player handler
   const handleDeletePlayer = async (id: string) => {
-    if (isReadOnlyViewer) return;
+    const target = playersRef.current.find((p) => p.id === id);
+    if (!target) return;
+
     lastLocalWriteAtRef.current = Date.now();
+
+    if (isReadOnlyViewer) {
+      if (id.startsWith('local-')) {
+        await deletePlayer(id);
+        const nextPlayers = playersRef.current.filter((p) => p.id !== id);
+        playersRef.current = nextPlayers;
+        syncFingerprintsRef.current.players = buildPlayersFingerprint(nextPlayers);
+        setPlayers(nextPlayers);
+      } else {
+        // Server-synced player: keep jersey number & stats linkage, wipe only local PII
+        const cleared: Player = {
+          ...target,
+          firstName: '',
+          lastName: '',
+          photo: undefined,
+          notes: undefined,
+        };
+        await savePlayer(cleared);
+        const nextPlayers = playersRef.current.map((p) => (p.id === id ? cleared : p));
+        playersRef.current = nextPlayers;
+        syncFingerprintsRef.current.players = buildPlayersFingerprint(nextPlayers);
+        setPlayers(nextPlayers);
+      }
+      return;
+    }
+
     await deletePlayer(id);
-    const nextPlayers = players.filter((p) => p.id !== id);
+    const nextPlayers = playersRef.current.filter((p) => p.id !== id);
     playersRef.current = nextPlayers;
+    syncFingerprintsRef.current.players = buildPlayersFingerprint(nextPlayers);
     setPlayers(nextPlayers);
 
     if (roomId && coachToken) {
@@ -1461,8 +1591,9 @@ export default function App() {
               players={players}
               clubProfile={clubProfile}
               onOpenClubProfile={!isReadOnlyViewer ? () => setIsClubProfileOpen(true) : undefined}
-              onSavePlayer={!isReadOnlyViewer ? handleSavePlayer : undefined}
-              onDeletePlayer={!isReadOnlyViewer ? handleDeletePlayer : undefined}
+              onSavePlayer={handleSavePlayer}
+              onSavePlayersBulk={handleSavePlayersBulk}
+              onDeletePlayer={handleDeletePlayer}
               matches={matches}
               readOnly={isReadOnlyViewer}
               onOpenTeamExport={!isReadOnlyViewer ? () => handleOpenTeamExportImport('export') : undefined}
@@ -1482,6 +1613,7 @@ export default function App() {
               onDeleteMatch={!isReadOnlyViewer ? handleDeleteMatch : undefined}
               readOnly={isReadOnlyViewer}
               onGoToLive={() => setCurrentTab('live')}
+              onGoToRoster={() => setCurrentTab('roster')}
               onOpenTransferModal={() => setIsTransferModalOpen(true)}
               onOpenTeamExport={!isReadOnlyViewer ? () => handleOpenTeamExportImport('export') : undefined}
             />

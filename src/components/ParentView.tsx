@@ -48,6 +48,8 @@ import {
   AlertCircle,
   Plus,
   Minus,
+  Shield,
+  UserCheck,
 } from 'lucide-react';
 import { playClickSound, triggerHaptic } from '../services/tts';
 import { useLanguage } from '../i18n/LanguageContext';
@@ -95,6 +97,7 @@ export const ParentView: React.FC<ParentViewProps> = ({ onBackToHome, soundEnabl
 
   // Highlight input
   const [customHighlight, setCustomHighlight] = useState('');
+  const [includePersonalDataInPdf, setIncludePersonalDataInPdf] = useState(false);
 
   // Playing timer ticker - ONLY TICKS when match is running (isClockRunning === true) AND child is on court (isOnCourt === true)
   useEffect(() => {
@@ -636,7 +639,9 @@ export const ParentView: React.FC<ParentViewProps> = ({ onBackToHome, soundEnabl
     if (!selectedChild) return;
     playClickSound();
     triggerHaptic(30);
-    await exportChildMatchPdf(record, selectedChild);
+    await exportChildMatchPdf(record, selectedChild, {
+      includePersonalData: includePersonalDataInPdf,
+    });
   };
 
   // Career Statistics Calculation
@@ -1553,17 +1558,51 @@ export const ParentView: React.FC<ParentViewProps> = ({ onBackToHome, soundEnabl
       {/* ======================================================== */}
       {subTab === 'history' && (
         <div className="space-y-4">
-          <div className="flex items-center justify-between">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
             <h3 className="text-base sm:text-lg font-black text-white">
               Zapisane Mecze ({childMatches.length})
             </h3>
-            <button
-              onClick={() => setIsNewMatchOpen(true)}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-black text-xs transition active:scale-95 shadow-md"
-            >
-              <PlusCircle className="w-3.5 h-3.5" />
-              <span>Nowy Mecz</span>
-            </button>
+            <div className="flex items-center gap-2 flex-wrap">
+              <div className="inline-flex items-center gap-1 p-1 rounded-xl bg-slate-900 border border-slate-800">
+                <button
+                  type="button"
+                  onClick={() => {
+                    playClickSound();
+                    setIncludePersonalDataInPdf(false);
+                  }}
+                  className={`flex items-center gap-1 px-2.5 py-1 rounded-lg text-[11px] font-bold transition ${
+                    !includePersonalDataInPdf
+                      ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/40'
+                      : 'text-slate-400 hover:text-slate-200 border border-transparent'
+                  }`}
+                >
+                  <Shield className="w-3 h-3" />
+                  <span>PDF zanonimizowany (nr)</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    playClickSound();
+                    setIncludePersonalDataInPdf(true);
+                  }}
+                  className={`flex items-center gap-1 px-2.5 py-1 rounded-lg text-[11px] font-bold transition ${
+                    includePersonalDataInPdf
+                      ? 'bg-amber-500/20 text-amber-300 border border-amber-500/40'
+                      : 'text-slate-400 hover:text-slate-200 border border-transparent'
+                  }`}
+                >
+                  <UserCheck className="w-3 h-3" />
+                  <span>PDF pełny (imię i rocznik)</span>
+                </button>
+              </div>
+              <button
+                onClick={() => setIsNewMatchOpen(true)}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-black text-xs transition active:scale-95 shadow-md"
+              >
+                <PlusCircle className="w-3.5 h-3.5" />
+                <span>Nowy Mecz</span>
+              </button>
+            </div>
           </div>
 
           {childMatches.length === 0 ? (

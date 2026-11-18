@@ -28,6 +28,8 @@ import {
   Mail,
   Layers,
   Upload,
+  Shield,
+  UserCheck,
 } from 'lucide-react';
 import { playClickSound, triggerHaptic } from '../services/tts';
 import { useLanguage } from '../i18n/LanguageContext';
@@ -35,7 +37,7 @@ import { BoxScoreTable } from './BoxScoreTable';
 import { PlayByPlayModal } from './PlayByPlayModal';
 import { ResumeMatchConfirmModal } from './ResumeMatchConfirmModal';
 import { exportMatchPdf } from '../services/exportPdf';
-import { getPlayerFullName, hasAnyPersonalData, resolveEventPlayerLabel } from '../services/playerDisplay';
+import { getPlayerFullName, resolveEventPlayerLabel } from '../services/playerDisplay';
 
 interface HomePageProps {
   activeCategory?: TeamCategory;
@@ -86,7 +88,14 @@ export const HomePage: React.FC<HomePageProps> = ({
   const [selectedSeason, setSelectedSeason] = useState<string>('all');
   const [includePersonalData, setIncludePersonalData] = useState<boolean>(false);
 
-  const hasPii = useMemo(() => hasAnyPersonalData(players), [players]);
+  const getRosterForMatch = (match: Match): Player[] => {
+    const matched = players.filter(
+      (p) =>
+        match.rosterPlayerIds?.includes(p.id) ||
+        match.events?.some((e) => e.playerId === p.id)
+    );
+    return matched.length > 0 ? matched : players;
+  };
 
   const clubName = clubProfile?.name || 'Moja Drużyna Koszykarska';
   const city = clubProfile?.city || 'Polska';
@@ -748,16 +757,16 @@ export const HomePage: React.FC<HomePageProps> = ({
               )}
             </div>
 
-            {!readOnly && (
-              <div className="mt-4 pt-3 border-t border-slate-800 flex items-center justify-end">
-                <button
-                  onClick={onGoToRoster}
-                  className="text-xs font-bold text-amber-400 hover:text-amber-300"
-                >
-                  + {t('roster.addPlayer')}
-                </button>
-              </div>
-            )}
+            <div className="mt-4 pt-3 border-t border-slate-800 flex items-center justify-end">
+              <button
+                onClick={onGoToRoster}
+                className="text-xs font-bold text-amber-400 hover:text-amber-300"
+              >
+                {readOnly
+                  ? 'Uzupełnij imiona drużyny (lokalnie) →'
+                  : `+ ${t('roster.addPlayer')}`}
+              </button>
+            </div>
           </div>
         </div>
       </div>
@@ -770,7 +779,7 @@ export const HomePage: React.FC<HomePageProps> = ({
               <span className="text-sm font-bold text-white">
                 Raport Meczowy: {clubProfile?.shortName || clubName} vs {viewingMatch.opponent} ({viewingMatch.ourScore}:{viewingMatch.opponentScore})
               </span>
-              <div className="flex items-center gap-2">
+              <div className="flex items-center gap-2 flex-wrap">
                 {!readOnly && onResumeMatch && (
                   <button
                     onClick={() => {
@@ -785,24 +794,35 @@ export const HomePage: React.FC<HomePageProps> = ({
                     <span>Edytuj mecz</span>
                   </button>
                 )}
-                {hasPii && (
-                  <label className="flex items-center gap-1.5 cursor-pointer select-none text-[11px] text-slate-300 px-2 py-1 rounded-lg bg-slate-900 border border-slate-800">
-                    <input
-                      type="checkbox"
-                      checked={includePersonalData}
-                      onChange={(e) => setIncludePersonalData(e.target.checked)}
-                      className="w-3.5 h-3.5 accent-amber-500 rounded cursor-pointer"
-                    />
-                    <span>Dane osobowe w PDF</span>
-                  </label>
-                )}
+                <div className="inline-flex items-center gap-0.5 p-0.5 rounded-lg bg-slate-900 border border-slate-800">
+                  <button
+                    type="button"
+                    onClick={() => setIncludePersonalData(false)}
+                    className={`flex items-center gap-1 px-2 py-1 rounded-md text-[10px] font-bold transition ${
+                      !includePersonalData
+                        ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/40'
+                        : 'text-slate-400 hover:text-slate-200 border border-transparent'
+                    }`}
+                  >
+                    <Shield className="w-3 h-3" />
+                    <span>Zanonimizowany</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setIncludePersonalData(true)}
+                    className={`flex items-center gap-1 px-2 py-1 rounded-md text-[10px] font-bold transition ${
+                      includePersonalData
+                        ? 'bg-amber-500/20 text-amber-300 border border-amber-500/40'
+                        : 'text-slate-400 hover:text-slate-200 border border-transparent'
+                    }`}
+                  >
+                    <UserCheck className="w-3 h-3" />
+                    <span>Pełny</span>
+                  </button>
+                </div>
                 <button
                   onClick={() => {
-                    const roster =
-                      viewingMatch.rosterPlayerIds && viewingMatch.rosterPlayerIds.length > 0
-                        ? players.filter((p) => viewingMatch.rosterPlayerIds.includes(p.id))
-                        : players;
-                    exportMatchPdf(viewingMatch, roster, {
+                    exportMatchPdf(viewingMatch, getRosterForMatch(viewingMatch), {
                       includeBoxScore: true,
                       includePlayByPlay: true,
                       includePlayerPages: true,
@@ -833,12 +853,11 @@ export const HomePage: React.FC<HomePageProps> = ({
             <div className="flex-1 overflow-y-auto p-3 sm:p-5">
               <BoxScoreTable
                 match={viewingMatch}
-                rosterPlayers={players.filter((p) =>
-                  viewingMatch.rosterPlayerIds?.includes(p.id) ||
-                  viewingMatch.events.some((e) => e.playerId === p.id)
-                )}
+                rosterPlayers={getRosterForMatch(viewingMatch)}
                 isMatchActive={false}
                 clubProfile={clubProfile}
+                defaultIncludePersonalData={includePersonalData}
+                onChangeIncludePersonalData={setIncludePersonalData}
               />
             </div>
           </div>
@@ -853,6 +872,8 @@ export const HomePage: React.FC<HomePageProps> = ({
           match={viewingPlayByPlay}
           rosterPlayers={players}
           onDeleteEvent={readOnly ? undefined : () => {}}
+          defaultIncludePersonalData={includePersonalData}
+          onChangeIncludePersonalData={setIncludePersonalData}
         />
       )}
 

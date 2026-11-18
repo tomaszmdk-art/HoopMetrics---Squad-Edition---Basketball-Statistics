@@ -1,6 +1,6 @@
-import React, { useState } from 'react';
-import { Match, MatchEvent, Player } from '../types/basketball';
-import { X, Trash2, Download, AlertCircle, Clock, FileText, Loader2 } from 'lucide-react';
+import React, { useState, useEffect } from 'react';
+import { Match, Player } from '../types/basketball';
+import { X, Trash2, Download, Clock, FileText, Loader2, Shield, UserCheck } from 'lucide-react';
 import { exportPlayByPlayCsv } from '../services/exportCsv';
 import { exportPlayByPlayPdf } from '../services/exportPdf';
 import { playClickSound, triggerHaptic } from '../services/tts';
@@ -18,6 +18,8 @@ interface PlayByPlayModalProps {
   match: Match;
   rosterPlayers?: Player[];
   onDeleteEvent?: (eventId: string) => void;
+  defaultIncludePersonalData?: boolean;
+  onChangeIncludePersonalData?: (val: boolean) => void;
 }
 
 const ACTION_DESCRIPTIONS: Record<string, { label: string; badge: string }> = {
@@ -51,12 +53,23 @@ export const PlayByPlayModal: React.FC<PlayByPlayModalProps> = ({
   match,
   rosterPlayers = [],
   onDeleteEvent,
+  defaultIncludePersonalData = false,
+  onChangeIncludePersonalData,
 }) => {
   const [isExportingPdf, setIsExportingPdf] = useState(false);
-  const [includePersonalData, setIncludePersonalData] = useState(false);
+  const [includePersonalData, setIncludePersonalData] = useState(defaultIncludePersonalData);
   const [selectedPlayerId, setSelectedPlayerId] = useState<string>('all');
   const [selectedQuarter, setSelectedQuarter] = useState<number | 'all'>('all');
   const hasPii = hasAnyPersonalData(rosterPlayers);
+
+  useEffect(() => {
+    setIncludePersonalData(defaultIncludePersonalData);
+  }, [defaultIncludePersonalData]);
+
+  const handleSetIncludePersonalData = (val: boolean) => {
+    setIncludePersonalData(val);
+    onChangeIncludePersonalData?.(val);
+  };
 
   // Extract all unique players who have recorded events
   const playersWithEvents = React.useMemo(() => {
@@ -175,22 +188,44 @@ export const PlayByPlayModal: React.FC<PlayByPlayModalProps> = ({
           </div>
         </div>
 
-        {hasPii && (
-          <div className="px-4 py-2 bg-slate-950/90 border-b border-slate-800/80 flex items-center justify-end">
-            <label
-              className="flex items-center gap-2 text-[11px] font-semibold text-slate-300 cursor-pointer select-none hover:text-amber-300 transition"
-              title="Domyślnie protokół PDF i CSV zawiera wyłącznie numery zawodników"
-            >
-              <input
-                type="checkbox"
-                checked={includePersonalData}
-                onChange={(e) => setIncludePersonalData(e.target.checked)}
-                className="w-3.5 h-3.5 rounded accent-amber-500 cursor-pointer"
-              />
-              <span>Dołącz dane osobowe do PDF/CSV (imiona i nazwiska)</span>
-            </label>
+        <div className="px-4 py-2 bg-slate-950/90 border-b border-slate-800/80 flex flex-wrap items-center justify-between gap-2">
+          <span className="text-[11px] font-bold text-slate-400">
+            Tryb eksportu PDF / CSV:
+          </span>
+          <div className="flex flex-col items-start sm:items-end gap-1">
+            <div className="inline-flex items-center gap-1 p-0.5 rounded-xl bg-slate-900 border border-slate-800">
+              <button
+                type="button"
+                onClick={() => handleSetIncludePersonalData(false)}
+                className={`flex items-center gap-1 px-2.5 py-1 rounded-lg text-[11px] font-bold transition ${
+                  !includePersonalData
+                    ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/40'
+                    : 'text-slate-400 hover:text-slate-200 border border-transparent'
+                }`}
+              >
+                <Shield className="w-3 h-3" />
+                <span>Zanonimizowany (nr)</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => handleSetIncludePersonalData(true)}
+                className={`flex items-center gap-1 px-2.5 py-1 rounded-lg text-[11px] font-bold transition ${
+                  includePersonalData
+                    ? 'bg-amber-500/20 text-amber-300 border border-amber-500/40'
+                    : 'text-slate-400 hover:text-slate-200 border border-transparent'
+                }`}
+              >
+                <UserCheck className="w-3 h-3" />
+                <span>Pełny (imiona/nazwiska)</span>
+              </button>
+            </div>
+            {includePersonalData && !hasPii && (
+              <span className="text-[10px] text-amber-300/90">
+                Brak lokalnych nazwisk — uzupełnij skład w zakładce Kadra, aby pojawiły się w pełnym raporcie.
+              </span>
+            )}
           </div>
-        )}
+        </div>
 
         {/* Filters Bar: Select Player and Quarter */}
         <div className="p-3 bg-slate-950/80 border-b border-slate-800/80 flex items-center justify-between gap-2.5 flex-wrap">

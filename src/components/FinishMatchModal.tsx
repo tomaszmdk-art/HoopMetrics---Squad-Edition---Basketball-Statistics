@@ -10,6 +10,8 @@ import {
   ArrowRight,
   HelpCircle,
   FileText,
+  Shield,
+  UserCheck,
 } from 'lucide-react';
 import { exportMatchPdf } from '../services/exportPdf';
 import { hasAnyPersonalData } from '../services/playerDisplay';
@@ -139,17 +141,44 @@ export const FinishMatchModal: React.FC<FinishMatchModalProps> = ({
           </div>
         </label>
 
-        {hasPii && (
-          <label className="flex items-center gap-2.5 p-2.5 rounded-xl bg-slate-950/60 border border-slate-800 cursor-pointer select-none hover:border-slate-700 transition text-xs text-slate-300">
-            <input
-              type="checkbox"
-              checked={includePersonalData}
-              onChange={(e) => setIncludePersonalData(e.target.checked)}
-              className="w-4 h-4 accent-amber-500 rounded cursor-pointer"
-            />
-            <span>Dołącz dane osobowe do PDF (imiona, nazwiska, zdjęcia)</span>
-          </label>
-        )}
+        <div className="p-2.5 rounded-xl bg-slate-950/60 border border-slate-800 flex flex-wrap items-center justify-between gap-2">
+          <span className="text-xs font-semibold text-slate-300">
+            Tryb raportu PDF:
+          </span>
+          <div className="flex flex-col items-start sm:items-end gap-1">
+            <div className="inline-flex items-center gap-1 p-0.5 rounded-lg bg-slate-900 border border-slate-800">
+              <button
+                type="button"
+                onClick={() => setIncludePersonalData(false)}
+                className={`flex items-center gap-1 px-2.5 py-1 rounded-md text-[11px] font-bold transition ${
+                  !includePersonalData
+                    ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/40'
+                    : 'text-slate-400 hover:text-slate-200 border border-transparent'
+                }`}
+              >
+                <Shield className="w-3 h-3" />
+                <span>Zanonimizowany (nr)</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setIncludePersonalData(true)}
+                className={`flex items-center gap-1 px-2.5 py-1 rounded-md text-[11px] font-bold transition ${
+                  includePersonalData
+                    ? 'bg-amber-500/20 text-amber-300 border border-amber-500/40'
+                    : 'text-slate-400 hover:text-slate-200 border border-transparent'
+                }`}
+              >
+                <UserCheck className="w-3 h-3" />
+                <span>Pełny (nazwiska/zdjęcia)</span>
+              </button>
+            </div>
+            {includePersonalData && !hasPii && (
+              <span className="text-[10px] text-amber-300/90">
+                Brak lokalnych nazwisk/zdjęć — PDF użyje numerów zawodników.
+              </span>
+            )}
+          </div>
+        </div>
 
         {/* Modal Action Buttons */}
         <div className="flex flex-col-reverse sm:flex-row items-center justify-end gap-2.5 pt-2">

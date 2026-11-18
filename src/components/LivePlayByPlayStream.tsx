@@ -13,6 +13,7 @@ import {
   Users,
   Flame,
   Shield,
+  UserCheck,
 } from 'lucide-react';
 import { exportPlayByPlayPdf } from '../services/exportPdf';
 import { exportPlayByPlayCsv } from '../services/exportCsv';
@@ -186,20 +187,39 @@ export const LivePlayByPlayStream: React.FC<LivePlayByPlayStreamProps> = ({
             </button>
           </div>
 
-          {hasPii && (
-            <label
-              className="flex items-center gap-2 text-[11px] font-semibold text-slate-300 bg-slate-950/80 border border-slate-800 px-2.5 py-1 rounded-xl cursor-pointer select-none hover:border-amber-500/40 transition"
-              title="Domyślnie protokół PDF i CSV zawiera wyłącznie numery zawodników"
-            >
-              <input
-                type="checkbox"
-                checked={includePersonalData}
-                onChange={(e) => setIncludePersonalData(e.target.checked)}
-                className="w-3.5 h-3.5 rounded accent-amber-500 cursor-pointer"
-              />
-              <span>Dołącz dane osobowe do PDF/CSV</span>
-            </label>
-          )}
+          <div className="flex flex-col items-start md:items-end gap-1">
+            <div className="inline-flex items-center gap-1 p-0.5 rounded-xl bg-slate-950 border border-slate-800">
+              <button
+                type="button"
+                onClick={() => setIncludePersonalData(false)}
+                className={`flex items-center gap-1 px-2.5 py-1 rounded-lg text-[11px] font-bold transition ${
+                  !includePersonalData
+                    ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/40'
+                    : 'text-slate-400 hover:text-slate-200 border border-transparent'
+                }`}
+              >
+                <Shield className="w-3 h-3" />
+                <span>Zanonimizowany (nr)</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setIncludePersonalData(true)}
+                className={`flex items-center gap-1 px-2.5 py-1 rounded-lg text-[11px] font-bold transition ${
+                  includePersonalData
+                    ? 'bg-amber-500/20 text-amber-300 border border-amber-500/40'
+                    : 'text-slate-400 hover:text-slate-200 border border-transparent'
+                }`}
+              >
+                <UserCheck className="w-3 h-3" />
+                <span>Pełny (nazwiska)</span>
+              </button>
+            </div>
+            {includePersonalData && !hasPii && (
+              <span className="text-[10px] text-amber-300/90">
+                Brak lokalnych nazwisk — uzupełnij skład w zakładce Kadra.
+              </span>
+            )}
+          </div>
         </div>
       </div>
 
