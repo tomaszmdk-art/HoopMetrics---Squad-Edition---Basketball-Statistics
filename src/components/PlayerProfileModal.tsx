@@ -3,6 +3,7 @@ import { Player, Match } from '../types/basketball';
 import { calculatePlayerStats } from '../services/statsCalculator';
 import { X, Trophy, Flame, Target, Shield, Award, Calendar } from 'lucide-react';
 import { playClickSound, triggerHaptic } from '../services/tts';
+import { getPlayerFullName } from '../services/playerDisplay';
 
 interface PlayerProfileModalProps {
   player: Player | null;
@@ -69,7 +70,7 @@ export const PlayerProfileModal: React.FC<PlayerProfileModalProps> = ({
               <div className="relative w-16 h-16 sm:w-20 sm:h-20 rounded-2xl overflow-hidden shrink-0 border-2 border-amber-500/60 shadow-xl shadow-amber-950/40 bg-slate-950">
                 <img
                   src={player.photo}
-                  alt={`${player.firstName} ${player.lastName}`}
+                  alt={getPlayerFullName(player)}
                   className="w-full h-full object-cover"
                 />
                 <span className="absolute bottom-0 right-0 bg-slate-950/90 text-amber-400 font-mono font-black text-xs px-1.5 py-0.5 rounded-tl-lg border-t border-l border-amber-500/40">
@@ -96,7 +97,7 @@ export const PlayerProfileModal: React.FC<PlayerProfileModalProps> = ({
                 </span>
               </div>
               <h2 className="text-xl sm:text-2xl font-black text-white tracking-tight">
-                {player.firstName} {player.lastName}
+                {getPlayerFullName(player)}
               </h2>
               <p className="text-xs text-slate-400 mt-0.5">
                 Karta Zawodnika{player.teamCategory && player.teamCategory !== 'TEAM' ? ` • ${player.teamCategory}` : ''} • Sezon 2026/2027

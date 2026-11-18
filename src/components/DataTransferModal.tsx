@@ -11,6 +11,7 @@ import {
   pushServerStateImmediate,
 } from '../services/syncService';
 import { playClickSound, triggerHaptic } from '../services/tts';
+import { mergeServerPlayersWithLocal } from '../services/playerDisplay';
 import {
   Cloud,
   CloudUpload,
@@ -143,8 +144,13 @@ export const DataTransferModal: React.FC<DataTransferModalProps> = ({
       // Save to IndexedDB
       await saveMatchesBulk(finalMatches);
 
+      const finalPlayers =
+        serverPlayers.length > 0
+          ? mergeServerPlayersWithLocal(serverPlayers, players)
+          : players;
+
       // Notify parent app
-      onDataImported(finalMatches, serverPlayers.length > 0 ? serverPlayers : players);
+      onDataImported(finalMatches, finalPlayers);
 
       setSyncSuccess(true);
       setSyncStatus(`Pobrano pomyślnie! Masz teraz dostęp do ${finalMatches.length} meczów na tym komputerze.`);

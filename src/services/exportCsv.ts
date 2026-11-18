@@ -1,6 +1,7 @@
 import { Match, Player, PlayerCareerAverages, PlayerMatchStats, TeamMatchStats } from '../types/basketball';
 import { calculatePlayerStats, calculateTeamStats } from './statsCalculator';
 import { getClubProfileSync } from './db';
+import { resolveEventPlayerLabel } from './playerDisplay';
 
 // Helper to trigger CSV download with UTF-8 BOM
 function downloadCsv(filename: string, content: string) {
@@ -17,7 +18,12 @@ function downloadCsv(filename: string, content: string) {
 }
 
 // 1. Export Match Box Score
-export function exportMatchBoxScoreCsv(match: Match, rosterPlayers: Player[], clubName?: string) {
+export function exportMatchBoxScoreCsv(
+  match: Match,
+  rosterPlayers: Player[],
+  clubName?: string,
+  includePersonalData: boolean = false
+) {
   const currentClub = clubName || getClubProfileSync()?.name || 'Drużyna Koszykarska';
   const categoryPart = match.teamCategory && match.teamCategory !== 'TEAM' ? ` ${match.teamCategory}` : '';
 
@@ -51,7 +57,7 @@ export function exportMatchBoxScoreCsv(match: Match, rosterPlayers: Player[], cl
     lines.push(
       [
         s.playerNumber,
-        `"${s.playerName}"`,
+        `"${includePersonalData ? s.playerName : `Zawodnik #${s.playerNumber}`}"`,
         s.pts,
         s.plusMinus > 0 ? `+${s.plusMinus}` : s.plusMinus,
         s.fg2m,
@@ -117,7 +123,11 @@ export function exportMatchBoxScoreCsv(match: Match, rosterPlayers: Player[], cl
 }
 
 // 2. Export Match Play-by-Play
-export function exportPlayByPlayCsv(match: Match) {
+export function exportPlayByPlayCsv(
+  match: Match,
+  rosterPlayers: Player[] = [],
+  includePersonalData: boolean = false
+) {
   const currentClub = getClubProfileSync()?.name || 'Drużyna';
   const titlePrefix = match.teamCategory && match.teamCategory !== 'TEAM' ? `${currentClub} ${match.teamCategory}` : currentClub;
   const lines: string[] = [];
@@ -157,7 +167,13 @@ export function exportPlayByPlayCsv(match: Match) {
         idx + 1,
         e.quarter > 4 ? 'Dogrywka (OT)' : `Kwarta ${e.quarter}`,
         e.gameClock,
-        `"${e.playerName || (e.type.startsWith('OPP') ? 'Przeciwnik' : 'Drużyna')}"`,
+        `"${
+          e.type.startsWith('OPP')
+            ? 'Przeciwnik'
+            : e.playerId || e.playerNumber !== undefined
+            ? resolveEventPlayerLabel(e, rosterPlayers, includePersonalData)
+            : 'Drużyna'
+        }"`,
         e.playerNumber || '-',
         `"${actionLabels[e.type] || e.type}"`,
         `"${e.subType || '-'}"`,
@@ -178,7 +194,8 @@ export function exportSeasonStatsCsv(
   category: string,
   seasonAverages: PlayerCareerAverages[],
   matchesCount: number,
-  clubName?: string
+  clubName?: string,
+  includePersonalData: boolean = false
 ) {
   const currentClub = clubName || getClubProfileSync()?.name || 'Drużyna Koszykarska';
   const cleanCat = category && category !== 'TEAM' ? category.trim() : '';
@@ -195,7 +212,7 @@ export function exportSeasonStatsCsv(
     lines.push(
       [
         p.playerNumber,
-        `"${p.playerName}"`,
+        `"${includePersonalData ? p.playerName : `Zawodnik #${p.playerNumber}`}"`,
         p.gamesPlayed,
         p.totalPts,
         p.ppg,

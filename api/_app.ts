@@ -39,14 +39,14 @@ export interface ServerRoomState {
 }
 
 const DEMO_SINGLE_TEAM_PLAYERS = [
-  { id: 'demo-team-1', teamCategory: 'TEAM', firstName: 'Jan', lastName: 'Kowalski', number: 4, position: 'PG', notes: 'Rozgrywający • Kapitan', createdAt: Date.now() },
-  { id: 'demo-team-2', teamCategory: 'TEAM', firstName: 'Adam', lastName: 'Nowak', number: 7, position: 'SG', notes: 'Strzelec dystansowy', createdAt: Date.now() },
-  { id: 'demo-team-3', teamCategory: 'TEAM', firstName: 'Piotr', lastName: 'Wiśniewski', number: 10, position: 'SF', notes: 'Skrzydłowy', createdAt: Date.now() },
-  { id: 'demo-team-4', teamCategory: 'TEAM', firstName: 'Kacper', lastName: 'Wójcik', number: 13, position: 'PF', notes: 'Silny skrzydłowy', createdAt: Date.now() },
-  { id: 'demo-team-5', teamCategory: 'TEAM', firstName: 'Filip', lastName: 'Kamiński', number: 15, position: 'C', notes: 'Środkowy', createdAt: Date.now() },
-  { id: 'demo-team-6', teamCategory: 'TEAM', firstName: 'Mikołaj', lastName: 'Lewandowski', number: 21, position: 'PG', notes: 'Obrońca', createdAt: Date.now() },
-  { id: 'demo-team-7', teamCategory: 'TEAM', firstName: 'Szymon', lastName: 'Zieliński', number: 33, position: 'SG', notes: 'Rzucający obrońca', createdAt: Date.now() },
-  { id: 'demo-team-8', teamCategory: 'TEAM', firstName: 'Jakub', lastName: 'Dąbrowski', number: 24, position: 'PF', notes: 'Skrzydłowy', createdAt: Date.now() },
+  { id: 'demo-team-1', teamCategory: 'TEAM', firstName: '', lastName: '', number: 4, position: 'PG', createdAt: Date.now() },
+  { id: 'demo-team-2', teamCategory: 'TEAM', firstName: '', lastName: '', number: 7, position: 'SG', createdAt: Date.now() },
+  { id: 'demo-team-3', teamCategory: 'TEAM', firstName: '', lastName: '', number: 10, position: 'SF', createdAt: Date.now() },
+  { id: 'demo-team-4', teamCategory: 'TEAM', firstName: '', lastName: '', number: 13, position: 'PF', createdAt: Date.now() },
+  { id: 'demo-team-5', teamCategory: 'TEAM', firstName: '', lastName: '', number: 15, position: 'C', createdAt: Date.now() },
+  { id: 'demo-team-6', teamCategory: 'TEAM', firstName: '', lastName: '', number: 21, position: 'PG', createdAt: Date.now() },
+  { id: 'demo-team-7', teamCategory: 'TEAM', firstName: '', lastName: '', number: 33, position: 'SG', createdAt: Date.now() },
+  { id: 'demo-team-8', teamCategory: 'TEAM', firstName: '', lastName: '', number: 24, position: 'PF', createdAt: Date.now() },
 ];
 
 const ROOM_ID_REGEX = /^[a-z0-9_-]{3,64}$/;
@@ -95,6 +95,42 @@ function createDefaultClubProfile(overrides: Partial<ServerClubProfile> = {}): S
     leagueName: 'Rozgrywki Ligowe',
     updatedAt: Date.now(),
     ...overrides,
+  };
+}
+
+function sanitizePlayerForStorage(p: any): any {
+  if (!p || typeof p !== 'object') return p;
+  return {
+    id: String(p.id || ''),
+    teamCategory: p.teamCategory || 'TEAM',
+    firstName: '',
+    lastName: '',
+    number: Number(p.number) || 0,
+    ...(p.position ? { position: p.position } : {}),
+    createdAt: typeof p.createdAt === 'number' ? p.createdAt : Date.now(),
+  };
+}
+
+function sanitizeEventForStorage(e: any): any {
+  if (!e || typeof e !== 'object') return e;
+  const { playerName: _pn, assistedByPlayerName: _apn, ...rest } = e;
+  return rest;
+}
+
+function sanitizeMatchForStorage(m: any): any {
+  if (!m || typeof m !== 'object') return m;
+  return {
+    ...m,
+    events: Array.isArray(m.events) ? m.events.map(sanitizeEventForStorage) : [],
+  };
+}
+
+function sanitizeClubForStorage(c: ServerClubProfile): ServerClubProfile {
+  if (!c || typeof c !== 'object') return c;
+  return {
+    ...c,
+    headCoach: '',
+    assistantCoach: '',
   };
 }
 
@@ -302,6 +338,11 @@ function normalizeLoadedRoom(parsed: ServerRoomState): ServerRoomState | null {
   if (!parsed.coachPin) {
     parsed.coachPin = '1234';
   }
+  parsed.players = Array.isArray(parsed.players) ? parsed.players.map(sanitizePlayerForStorage) : [];
+  parsed.matches = Array.isArray(parsed.matches) ? parsed.matches.map(sanitizeMatchForStorage) : [];
+  if (parsed.clubProfile) {
+    parsed.clubProfile = sanitizeClubForStorage(parsed.clubProfile);
+  }
   return parsed;
 }
 
@@ -505,11 +546,11 @@ if (fs.existsSync(legacySyncFilePath)) {
   try {
     const parsed = JSON.parse(fs.readFileSync(legacySyncFilePath, 'utf-8'));
     legacySyncState = {
-      matches: Array.isArray(parsed.matches) ? parsed.matches : [],
-      players: Array.isArray(parsed.players) ? parsed.players : [],
+      matches: Array.isArray(parsed.matches) ? parsed.matches.map(sanitizeMatchForStorage) : [],
+      players: Array.isArray(parsed.players) ? parsed.players.map(sanitizePlayerForStorage) : [],
       activeMatchId: parsed.activeMatchId || null,
       deletedMatchIds: Array.isArray(parsed.deletedMatchIds) ? parsed.deletedMatchIds : [],
-      clubProfile: parsed.clubProfile || createDefaultClubProfile(),
+      clubProfile: parsed.clubProfile ? sanitizeClubForStorage(parsed.clubProfile) : createDefaultClubProfile(),
       lastUpdated: parsed.lastUpdated || Date.now(),
     };
   } catch {
@@ -567,7 +608,6 @@ export function createApiApp(options: CreateApiAppOptions = {}): Express {
         city,
         season,
         leagueName,
-        headCoach,
         badgeEmoji,
         primaryColor,
         secondaryColor,
@@ -608,7 +648,8 @@ export function createApiApp(options: CreateApiAppOptions = {}): Express {
         city: typeof city === 'string' && city.trim() ? city.trim().slice(0, 50) : 'Polska',
         season: typeof season === 'string' && season.trim() ? season.trim().slice(0, 20) : '2026/2027',
         leagueName: typeof leagueName === 'string' && leagueName.trim() ? leagueName.trim().slice(0, 60) : 'Rozgrywki Ligowe',
-        headCoach: typeof headCoach === 'string' ? headCoach.trim().slice(0, 60) : '',
+        headCoach: '',
+        assistantCoach: '',
         badgeEmoji: typeof badgeEmoji === 'string' && badgeEmoji.trim() ? badgeEmoji.trim() : '🏀',
         primaryColor: typeof primaryColor === 'string' && primaryColor.startsWith('#') ? primaryColor : '#f59e0b',
         secondaryColor: typeof secondaryColor === 'string' && secondaryColor.startsWith('#') ? secondaryColor : '#0a192f',
@@ -617,7 +658,7 @@ export function createApiApp(options: CreateApiAppOptions = {}): Express {
       });
 
       const players = seedDemoPlayers
-        ? DEMO_SINGLE_TEAM_PLAYERS.map((p) => ({ ...p, createdAt: now }))
+        ? DEMO_SINGLE_TEAM_PLAYERS.map((p) => sanitizePlayerForStorage({ ...p, createdAt: now }))
         : [];
 
       const room: ServerRoomState = {
@@ -795,14 +836,15 @@ export function createApiApp(options: CreateApiAppOptions = {}): Express {
 
         for (const m of matches) {
           if (!m || !m.id || deletedSet.has(m.id)) continue;
+          const sanitizedMatch = sanitizeMatchForStorage(m);
           const current = existingMap.get(m.id);
           if (!current) {
-            existingMap.set(m.id, m);
+            existingMap.set(m.id, sanitizedMatch);
           } else {
-            const incomingTs = m.updatedAt || 0;
+            const incomingTs = sanitizedMatch.updatedAt || 0;
             const currentTs = current.updatedAt || 0;
-            if (incomingTs > currentTs || (incomingTs === currentTs && m.status === 'finished' && current.status !== 'finished')) {
-              existingMap.set(m.id, m);
+            if (incomingTs > currentTs || (incomingTs === currentTs && sanitizedMatch.status === 'finished' && current.status !== 'finished')) {
+              existingMap.set(m.id, sanitizedMatch);
             }
           }
         }
@@ -813,16 +855,16 @@ export function createApiApp(options: CreateApiAppOptions = {}): Express {
       }
 
       if (Array.isArray(players)) {
-        room.players = players;
+        room.players = players.map(sanitizePlayerForStorage);
       }
 
       if (clubProfile && typeof clubProfile.name === 'string') {
-        room.clubProfile = {
+        room.clubProfile = sanitizeClubForStorage({
           ...room.clubProfile,
           ...clubProfile,
           categories: ['TEAM'],
           updatedAt: Date.now(),
-        };
+        });
       }
 
       if (activeMatchId !== undefined) {
@@ -993,12 +1035,16 @@ Wyróżniający się gracze: ${JSON.stringify(matchData.topPerformers || [])}`;
         return;
       }
 
+      const safePlayers = Array.isArray(players)
+        ? players.map((p: any) => ({ id: p?.id, number: p?.number }))
+        : [];
+
       const prompt = `Jesteś asystentem sędziego/trenera drużyny koszykarskiej.
 Przekształć polską wypowiedź głosową trenera w tablicę akcji meczowych.
 Tekst komendy trenera: "${text}"
 
 Lista dostępnych zawodników naszej drużyny:
-${JSON.stringify(players || [])}
+${JSON.stringify(safePlayers)}
 
 Dozwolone kody akcji:
 - 2PT_MADE (celny za 2)
@@ -1067,10 +1113,12 @@ Zwróć TYLKO poprawny JSON (bez markdown) w formacie:
       }
       legacySyncState.deletedMatchIds = Array.from(deletedSet).slice(-500);
       if (Array.isArray(matches)) {
-        legacySyncState.matches = matches.filter((m: any) => m && m.id && !deletedSet.has(m.id));
+        legacySyncState.matches = matches
+          .filter((m: any) => m && m.id && !deletedSet.has(m.id))
+          .map(sanitizeMatchForStorage);
       }
-      if (Array.isArray(players)) legacySyncState.players = players;
-      if (clubProfile) legacySyncState.clubProfile = clubProfile;
+      if (Array.isArray(players)) legacySyncState.players = players.map(sanitizePlayerForStorage);
+      if (clubProfile) legacySyncState.clubProfile = sanitizeClubForStorage(clubProfile);
       if (activeMatchId !== undefined) legacySyncState.activeMatchId = activeMatchId;
       legacySyncState.lastUpdated = Date.now();
       try {

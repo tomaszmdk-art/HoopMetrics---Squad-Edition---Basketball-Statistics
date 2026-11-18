@@ -14,6 +14,17 @@ import {
 } from 'lucide-react';
 import { playClickSound, triggerHaptic } from '../services/tts';
 
+const formatNumAndName = (p: Player): string => {
+  const n = p.lastName?.trim() || p.firstName?.trim();
+  return n ? `#${p.number} ${n}` : `#${p.number}`;
+};
+
+const getCardPrimaryName = (p: Player): string =>
+  p.lastName?.trim() || p.firstName?.trim() || 'Zawodnik';
+
+const getCardSecondaryName = (p: Player): string =>
+  p.lastName?.trim() ? (p.firstName?.trim() || '') : (p.position || '');
+
 export interface SubRecord {
   id: string;
   outPlayer: Player;
@@ -82,7 +93,7 @@ export const SubstitutionModal: React.FC<SubstitutionModalProps> = ({
         second: '2-digit',
       });
       setLastSwapMessage(
-        `Wymieniono: #${courtPlayer.number} ${courtPlayer.lastName} ➔ #${benchPlayer.number} ${benchPlayer.lastName}`
+        `Wymieniono: ${formatNumAndName(courtPlayer)} ➔ ${formatNumAndName(benchPlayer)}`
       );
       setSubHistory((prev) => [
         {
@@ -318,11 +329,13 @@ export const SubstitutionModal: React.FC<SubstitutionModalProps> = ({
                           </span>
                         </div>
                         <div className="font-bold text-xs text-white truncate mt-1">
-                          {player.lastName}
+                          {getCardPrimaryName(player)}
                         </div>
-                        <div className="text-[10px] text-slate-400 truncate">
-                          {player.firstName}
-                        </div>
+                        {getCardSecondaryName(player) && (
+                          <div className="text-[10px] text-slate-400 truncate">
+                            {getCardSecondaryName(player)}
+                          </div>
+                        )}
                         {isTarget && (
                           <span className="mt-1.5 text-[9px] font-bold text-rose-300 uppercase block">
                             Wybrano do zejścia
@@ -368,11 +381,13 @@ export const SubstitutionModal: React.FC<SubstitutionModalProps> = ({
                             </span>
                           </div>
                           <div className="font-bold text-xs text-slate-200 truncate mt-1">
-                            {player.lastName}
+                            {getCardPrimaryName(player)}
                           </div>
-                          <div className="text-[10px] text-slate-400 truncate">
-                            {player.firstName}
-                          </div>
+                          {getCardSecondaryName(player) && (
+                            <div className="text-[10px] text-slate-400 truncate">
+                              {getCardSecondaryName(player)}
+                            </div>
+                          )}
                           {isTarget && (
                             <span className="mt-1.5 text-[9px] font-bold text-emerald-300 uppercase block">
                               Wybrano do wejścia
@@ -400,11 +415,11 @@ export const SubstitutionModal: React.FC<SubstitutionModalProps> = ({
                         <div className="flex items-center gap-2">
                           <span className="font-mono text-slate-500 text-[10px]">{rec.time}</span>
                           <span className="text-rose-400 font-mono font-bold">
-                            #{rec.outPlayer.number} {rec.outPlayer.lastName}
+                            {formatNumAndName(rec.outPlayer)}
                           </span>
                           <ArrowLeftRight className="w-3 h-3 text-slate-600" />
                           <span className="text-emerald-400 font-mono font-bold">
-                            #{rec.inPlayer.number} {rec.inPlayer.lastName}
+                            {formatNumAndName(rec.inPlayer)}
                           </span>
                         </div>
                         <button
@@ -449,7 +464,7 @@ export const SubstitutionModal: React.FC<SubstitutionModalProps> = ({
                     >
                       <div className="min-w-0">
                         <div className="font-mono font-black text-base">#{player.number}</div>
-                        <div className="truncate text-xs">{player.lastName}</div>
+                        <div className="truncate text-xs">{getCardPrimaryName(player)}</div>
                       </div>
                       <div className="text-right font-mono text-[11px]">
                         <div>{stats.pts} pkt</div>

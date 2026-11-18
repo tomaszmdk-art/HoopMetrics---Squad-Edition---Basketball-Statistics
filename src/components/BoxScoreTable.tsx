@@ -15,6 +15,7 @@ import {
   Filter,
 } from 'lucide-react';
 import { announcePlay, stopSpeaking, playClickSound, triggerHaptic } from '../services/tts';
+import { hasAnyPersonalData } from '../services/playerDisplay';
 
 interface BoxScoreTableProps {
   match: Match;
@@ -60,8 +61,10 @@ export const BoxScoreTable: React.FC<BoxScoreTableProps> = ({
   const [aiRecap, setAiRecap] = useState<string>(match.aiCoachRecap || '');
   const [isPlayingAudio, setIsPlayingAudio] = useState(false);
   const [isExportingPdf, setIsExportingPdf] = useState(false);
+  const [includePersonalData, setIncludePersonalData] = useState(false);
   const [sortKey, setSortKey] = useState<SortKey>('eval');
   const [sortAsc, setSortAsc] = useState<boolean>(false);
+  const hasPii = hasAnyPersonalData(rosterPlayers);
 
   // Calculate box score
   const playerStatsList: PlayerMatchStats[] = rosterPlayers.map((player) =>
@@ -109,6 +112,7 @@ export const BoxScoreTable: React.FC<BoxScoreTableProps> = ({
         includeBoxScore: true,
         includePlayByPlay: true,
         includePlayerPages: true,
+        includePersonalData,
       });
     } catch (err) {
       console.error('Błąd eksportu raportu PDF:', err);
@@ -122,7 +126,7 @@ export const BoxScoreTable: React.FC<BoxScoreTableProps> = ({
     playClickSound();
     triggerHaptic(30);
     try {
-      await exportBoxScorePdf(match, rosterPlayers);
+      await exportBoxScorePdf(match, rosterPlayers, { includePersonalData });
     } catch (err) {
       console.error('Błąd eksportu Box Score PDF:', err);
     } finally {
@@ -149,7 +153,7 @@ export const BoxScoreTable: React.FC<BoxScoreTableProps> = ({
             quarters: match.quarterScores,
             teamTotals: teamTotals,
             topPerformers: topEval.map((p) => ({
-              player: `#${p.playerNumber} ${p.playerName}`,
+              player: `#${p.playerNumber}`,
               pts: p.pts,
               reb: p.totReb,
               ast: p.ast,
@@ -224,50 +228,67 @@ export const BoxScoreTable: React.FC<BoxScoreTableProps> = ({
         </div>
 
         {/* Action buttons: PDF & CSV Exports */}
-        <div className="flex items-center gap-2 flex-wrap">
-          {/* Main PDF Export Button (Complete Report) */}
-          <button
-            onClick={handleExportFullPdf}
-            disabled={isExportingPdf}
-            className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 text-xs font-black transition active:scale-95 shadow-md shadow-amber-950/40 disabled:opacity-50"
-            title="Eksportuj pełny protokół meczowy ze statystykami i kroniką akcji do PDF"
-          >
-            {isExportingPdf ? (
-              <Loader2 className="w-4 h-4 animate-spin" />
-            ) : (
-              <FileText className="w-4 h-4 stroke-[2.5]" />
-            )}
-            <span>Raport PDF (Całość)</span>
-          </button>
-
-          {/* Box Score Only PDF */}
-          <button
-            onClick={handleExportBoxScorePdfOnly}
-            disabled={isExportingPdf}
-            className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-amber-300 text-xs font-bold border border-amber-500/30 transition active:scale-95 disabled:opacity-50"
-            title="Pobierz PDF tylko ze statystykami zawodników"
-          >
-            <Download className="w-3.5 h-3.5 text-amber-400" />
-            <span>Tylko Box Score PDF</span>
-          </button>
-
-          {/* CSV Export */}
-          <button
-            onClick={() => exportMatchBoxScoreCsv(match, rosterPlayers)}
-            className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-semibold border border-slate-700 transition active:scale-95"
-            title="Pobierz statystyki meczowe w formacie arkusza CSV"
-          >
-            <Download className="w-3.5 h-3.5 text-slate-400" />
-            <span>CSV</span>
-          </button>
-
-          {isMatchActive && onFinishMatch && (
+        <div className="flex flex-col items-start sm:items-end gap-2">
+          <div className="flex items-center gap-2 flex-wrap">
+            {/* Main PDF Export Button (Complete Report) */}
             <button
-              onClick={onFinishMatch}
-              className="px-4 py-2 rounded-xl bg-gradient-to-r from-emerald-500 to-teal-600 hover:from-emerald-400 hover:to-teal-500 text-slate-950 font-black text-xs transition active:scale-95 shadow-md shadow-emerald-950/40"
+              onClick={handleExportFullPdf}
+              disabled={isExportingPdf}
+              className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 text-xs font-black transition active:scale-95 shadow-md shadow-amber-950/40 disabled:opacity-50"
+              title="Eksportuj pełny protokół meczowy ze statystykami i kroniką akcji do PDF"
             >
-              Zakończ mecz
+              {isExportingPdf ? (
+                <Loader2 className="w-4 h-4 animate-spin" />
+              ) : (
+                <FileText className="w-4 h-4 stroke-[2.5]" />
+              )}
+              <span>Raport PDF (Całość)</span>
             </button>
+
+            {/* Box Score Only PDF */}
+            <button
+              onClick={handleExportBoxScorePdfOnly}
+              disabled={isExportingPdf}
+              className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-amber-300 text-xs font-bold border border-amber-500/30 transition active:scale-95 disabled:opacity-50"
+              title="Pobierz PDF tylko ze statystykami zawodników"
+            >
+              <Download className="w-3.5 h-3.5 text-amber-400" />
+              <span>Tylko Box Score PDF</span>
+            </button>
+
+            {/* CSV Export */}
+            <button
+              onClick={() => exportMatchBoxScoreCsv(match, rosterPlayers, clubProfile?.name, includePersonalData)}
+              className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-semibold border border-slate-700 transition active:scale-95"
+              title="Pobierz statystyki meczowe w formacie arkusza CSV"
+            >
+              <Download className="w-3.5 h-3.5 text-slate-400" />
+              <span>CSV</span>
+            </button>
+
+            {isMatchActive && onFinishMatch && (
+              <button
+                onClick={onFinishMatch}
+                className="px-4 py-2 rounded-xl bg-gradient-to-r from-emerald-500 to-teal-600 hover:from-emerald-400 hover:to-teal-500 text-slate-950 font-black text-xs transition active:scale-95 shadow-md shadow-emerald-950/40"
+              >
+                Zakończ mecz
+              </button>
+            )}
+          </div>
+
+          {hasPii && (
+            <label
+              className="flex items-center gap-2 text-[11px] font-semibold text-slate-300 bg-slate-950/80 border border-slate-800 px-2.5 py-1.5 rounded-xl cursor-pointer select-none hover:border-amber-500/40 transition"
+              title="Domyślnie raporty PDF i CSV zawierają wyłącznie numery zawodników bez imion, nazwisk i zdjęć"
+            >
+              <input
+                type="checkbox"
+                checked={includePersonalData}
+                onChange={(e) => setIncludePersonalData(e.target.checked)}
+                className="w-3.5 h-3.5 rounded accent-amber-500 cursor-pointer"
+              />
+              <span>Dołącz dane osobowe do PDF/CSV (imiona, nazwiska, zdjęcia)</span>
+            </label>
           )}
         </div>
       </div>

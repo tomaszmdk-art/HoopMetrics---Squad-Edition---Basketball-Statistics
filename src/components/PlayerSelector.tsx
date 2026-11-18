@@ -15,6 +15,18 @@ import {
 } from 'lucide-react';
 import { playClickSound, triggerHaptic } from '../services/tts';
 import { LiveMatchTheme, TileFontFamily } from '../types/liveMatchTheme';
+import { getPlayerFullName, getPlayerShortName } from '../services/playerDisplay';
+
+const formatNumAndName = (p: Player): string => {
+  const n = p.lastName?.trim() || p.firstName?.trim();
+  return n ? `#${p.number} ${n}` : `#${p.number}`;
+};
+
+const getCardPrimaryName = (p: Player): string =>
+  p.lastName?.trim() || p.firstName?.trim() || 'Zawodnik';
+
+const getCardSecondaryName = (p: Player): string =>
+  p.lastName?.trim() ? (p.firstName?.trim() || '') : (p.position || '');
 
 interface PlayerSelectorProps {
   match: Match;
@@ -105,7 +117,7 @@ export const PlayerSelector: React.FC<PlayerSelectorProps> = ({
         second: '2-digit',
       });
       setLastSwapMessage(
-        `Wymieniono: #${courtPlayer.number} ${courtPlayer.lastName} ➔ #${benchPlayer.number} ${benchPlayer.lastName}`
+        `Wymieniono: ${formatNumAndName(courtPlayer)} ➔ ${formatNumAndName(benchPlayer)}`
       );
       setSubHistory((prev) => [
         {
@@ -255,12 +267,16 @@ export const PlayerSelector: React.FC<PlayerSelectorProps> = ({
               {selectedPlayer.photo ? (
                 <img
                   src={selectedPlayer.photo}
-                  alt={selectedPlayer.lastName}
+                  alt={getPlayerShortName(selectedPlayer)}
                   className="w-5 h-5 rounded-md object-cover border border-slate-950/40 shrink-0"
                 />
               ) : null}
               <span className="font-mono">#{selectedPlayer.number}</span>
-              <span className="truncate max-w-[100px] sm:max-w-xs">{selectedPlayer.lastName}</span>
+              {(selectedPlayer.lastName?.trim() || selectedPlayer.firstName?.trim()) && (
+                <span className="truncate max-w-[100px] sm:max-w-xs">
+                  {getPlayerShortName(selectedPlayer)}
+                </span>
+              )}
               {(() => {
                 const s = calculatePlayerStats(selectedPlayer, match.events, match);
                 return (
@@ -346,7 +362,7 @@ export const PlayerSelector: React.FC<PlayerSelectorProps> = ({
                   <div className="relative w-11 h-11 sm:w-12 sm:h-12 rounded-xl overflow-hidden border border-amber-400/50 shadow-md bg-slate-950">
                     <img
                       src={player.photo}
-                      alt={player.lastName}
+                      alt={getPlayerShortName(player)}
                       className="w-full h-full object-cover"
                     />
                   </div>
@@ -392,18 +408,20 @@ export const PlayerSelector: React.FC<PlayerSelectorProps> = ({
                     className={`font-black text-xs sm:text-sm uppercase tracking-tight truncate leading-tight ${
                       isSelected ? 'text-slate-950' : 'text-white'
                     }`}
-                    title={`${player.firstName} ${player.lastName}`}
+                    title={getPlayerFullName(player)}
                   >
-                    {player.lastName}
+                    {getCardPrimaryName(player)}
                   </span>
                 </div>
-                <div
-                  className={`text-[10px] sm:text-[11px] font-semibold truncate leading-none mt-1 ${
-                    isSelected ? 'text-slate-900/80 font-bold' : 'text-slate-400'
-                  }`}
-                >
-                  {player.firstName}
-                </div>
+                {getCardSecondaryName(player) && (
+                  <div
+                    className={`text-[10px] sm:text-[11px] font-semibold truncate leading-none mt-1 ${
+                      isSelected ? 'text-slate-900/80 font-bold' : 'text-slate-400'
+                    }`}
+                  >
+                    {getCardSecondaryName(player)}
+                  </div>
+                )}
               </div>
 
               {/* 3. PRAWA CZĘŚĆ: PUNKTY, +/-, EVAL I FAULE */}
@@ -515,11 +533,13 @@ export const PlayerSelector: React.FC<PlayerSelectorProps> = ({
               >
                 {player.photo ? (
                   <div className="w-5 h-5 rounded-md overflow-hidden shrink-0 border border-amber-400/40 bg-slate-950">
-                    <img src={player.photo} alt={player.lastName} className="w-full h-full object-cover" />
+                    <img src={player.photo} alt={getPlayerShortName(player)} className="w-full h-full object-cover" />
                   </div>
                 ) : null}
                 <span className="font-mono font-bold text-amber-400">#{player.number}</span>
-                <span className="truncate max-w-[70px]">{player.lastName}</span>
+                {(player.lastName?.trim() || player.firstName?.trim()) && (
+                  <span className="truncate max-w-[70px]">{getPlayerShortName(player)}</span>
+                )}
                 <span className="text-[9px] text-slate-400 font-mono">({stats.pts}p)</span>
                 <span
                   className={`text-[9px] font-mono font-black px-1 rounded ${
@@ -665,7 +685,7 @@ export const PlayerSelector: React.FC<PlayerSelectorProps> = ({
                           <>
                             Wybrano schodzącego:{' '}
                             <strong className="text-rose-400 font-mono">
-                              #{activeCourtTarget.number} {activeCourtTarget.lastName}
+                              {formatNumAndName(activeCourtTarget)}
                             </strong>
                             . Teraz kliknij gracza z ławki poniżej.
                           </>
@@ -673,7 +693,7 @@ export const PlayerSelector: React.FC<PlayerSelectorProps> = ({
                           <>
                             Wybrano wchodzącego:{' '}
                             <strong className="text-emerald-400 font-mono">
-                              #{activeBenchTarget.number} {activeBenchTarget.lastName}
+                              {formatNumAndName(activeBenchTarget)}
                             </strong>
                             . Teraz kliknij gracza z parkietu, którego zastępuje.
                           </>
@@ -742,11 +762,13 @@ export const PlayerSelector: React.FC<PlayerSelectorProps> = ({
                             </div>
 
                             <div className="text-xs font-bold truncate max-w-full text-white my-0.5">
-                              {player.lastName}
+                              {getCardPrimaryName(player)}
                             </div>
-                            <div className="text-[10px] text-slate-400 truncate max-w-full">
-                              {player.firstName}
-                            </div>
+                            {getCardSecondaryName(player) && (
+                              <div className="text-[10px] text-slate-400 truncate max-w-full">
+                                {getCardSecondaryName(player)}
+                              </div>
+                            )}
 
                             <div className="flex items-center justify-center gap-1.5 text-[10px] font-mono mt-1 pt-1 border-t border-slate-800/80">
                               <span className="text-amber-300 font-bold">{stats.pts}p</span>
@@ -823,11 +845,13 @@ export const PlayerSelector: React.FC<PlayerSelectorProps> = ({
                                     #{player.number}
                                   </span>
                                   <span className="text-xs font-bold text-white truncate">
-                                    {player.lastName}
+                                    {getCardPrimaryName(player)}
                                   </span>
                                 </div>
                                 <div className="text-[10px] text-slate-400 flex items-center gap-1 mt-0.5">
-                                  <span>{player.firstName}</span>
+                                  {getCardSecondaryName(player) && (
+                                    <span>{getCardSecondaryName(player)}</span>
+                                  )}
                                   <span className="text-amber-300 font-mono font-bold">({stats.pts}p</span>
                                   <span
                                     className={`font-mono font-bold ${
@@ -931,11 +955,12 @@ export const PlayerSelector: React.FC<PlayerSelectorProps> = ({
                                 #{player.number}
                               </span>
                               <span className="text-xs font-bold text-white truncate">
-                                {player.lastName}
+                                {getCardPrimaryName(player)}
                               </span>
                             </div>
                             <div className="text-[10px] text-slate-400 mt-0.5">
-                              {player.firstName} • {stats.pts}p • +/- {stats.plusMinus > 0 ? `+${stats.plusMinus}` : stats.plusMinus} • Eval {stats.eval}
+                              {getCardSecondaryName(player) ? `${getCardSecondaryName(player)} • ` : ''}
+                              {stats.pts}p • +/- {stats.plusMinus > 0 ? `+${stats.plusMinus}` : stats.plusMinus} • Eval {stats.eval}
                             </div>
                           </div>
 
@@ -970,11 +995,11 @@ export const PlayerSelector: React.FC<PlayerSelectorProps> = ({
                       >
                         <div className="flex items-center gap-1.5">
                           <span className="text-rose-400 font-bold">
-                            ⬇ #{rec.outPlayer.number} {rec.outPlayer.lastName}
+                            ⬇ {formatNumAndName(rec.outPlayer)}
                           </span>
                           <span className="text-slate-500">➔</span>
                           <span className="text-emerald-400 font-bold">
-                            ⬆ #{rec.inPlayer.number} {rec.inPlayer.lastName}
+                            ⬆ {formatNumAndName(rec.inPlayer)}
                           </span>
                         </div>
                         <span className="text-[10px] text-slate-500">{rec.time}</span>
@@ -990,7 +1015,7 @@ export const PlayerSelector: React.FC<PlayerSelectorProps> = ({
               <div className="text-xs text-slate-300 flex items-center gap-1.5 flex-wrap">
                 <span className="text-slate-400">Aktualnie na parkiecie:</span>
                 <span className="font-mono text-amber-400 font-bold">
-                  {onCourtPlayers.map((p) => `#${p.number} ${p.lastName}`).join(', ') || 'Brak'}
+                  {onCourtPlayers.map((p) => formatNumAndName(p)).join(', ') || 'Brak'}
                 </span>
               </div>
 

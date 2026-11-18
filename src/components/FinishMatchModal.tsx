@@ -12,6 +12,7 @@ import {
   FileText,
 } from 'lucide-react';
 import { exportMatchPdf } from '../services/exportPdf';
+import { hasAnyPersonalData } from '../services/playerDisplay';
 import { playClickSound, triggerHaptic } from '../services/tts';
 
 interface FinishMatchModalProps {
@@ -30,8 +31,10 @@ export const FinishMatchModal: React.FC<FinishMatchModalProps> = ({
   onCancel,
 }) => {
   const [confirmedChecked, setConfirmedChecked] = useState(false);
+  const [includePersonalData, setIncludePersonalData] = useState(false);
 
   if (!isOpen) return null;
+  const hasPii = hasAnyPersonalData(rosterPlayers);
 
   const isClockRunning = match.isClockRunning;
   const isFinalQuarter = match.currentQuarter >= 4;
@@ -136,6 +139,18 @@ export const FinishMatchModal: React.FC<FinishMatchModalProps> = ({
           </div>
         </label>
 
+        {hasPii && (
+          <label className="flex items-center gap-2.5 p-2.5 rounded-xl bg-slate-950/60 border border-slate-800 cursor-pointer select-none hover:border-slate-700 transition text-xs text-slate-300">
+            <input
+              type="checkbox"
+              checked={includePersonalData}
+              onChange={(e) => setIncludePersonalData(e.target.checked)}
+              className="w-4 h-4 accent-amber-500 rounded cursor-pointer"
+            />
+            <span>Dołącz dane osobowe do PDF (imiona, nazwiska, zdjęcia)</span>
+          </label>
+        )}
+
         {/* Modal Action Buttons */}
         <div className="flex flex-col-reverse sm:flex-row items-center justify-end gap-2.5 pt-2">
           <button
@@ -143,7 +158,12 @@ export const FinishMatchModal: React.FC<FinishMatchModalProps> = ({
             onClick={() => {
               playClickSound();
               triggerHaptic(20);
-              exportMatchPdf(match, rosterPlayers);
+              exportMatchPdf(match, rosterPlayers, {
+                includeBoxScore: true,
+                includePlayByPlay: true,
+                includePlayerPages: true,
+                includePersonalData,
+              });
             }}
             className="w-full sm:w-auto py-2.5 px-3.5 rounded-xl bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 border border-amber-500/40 text-xs font-bold transition flex items-center justify-center gap-1.5"
             title="Pobierz oficjalny raport PDF przed zakończeniem"

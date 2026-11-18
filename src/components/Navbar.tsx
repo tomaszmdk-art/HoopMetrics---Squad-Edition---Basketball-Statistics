@@ -23,6 +23,7 @@ import {
   X,
   LogOut,
   DoorOpen,
+  Upload,
 } from 'lucide-react';
 
 interface NavbarProps {
@@ -232,6 +233,18 @@ export const Navbar: React.FC<NavbarProps> = ({
             </>
           )}
 
+          {readOnly && onOpenTeamExportImport && (
+            <button
+              type="button"
+              onClick={() => onOpenTeamExportImport('import')}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-emerald-500/15 hover:bg-emerald-500/25 text-emerald-300 border border-emerald-500/40 font-bold text-xs transition active:scale-95 shadow-sm"
+              title="Wczytaj plik JSON ze składem i zdjęciami od trenera (zapis lokalny w tej przeglądarce)"
+            >
+              <Upload className="w-3.5 h-3.5 text-emerald-400" />
+              <span>Importuj skład</span>
+            </button>
+          )}
+
           {readOnly && onOpenCoachLogin && (
             <button
               onClick={onOpenCoachLogin}
@@ -404,6 +417,17 @@ export const Navbar: React.FC<NavbarProps> = ({
               )}
 
               <div className="grid grid-cols-2 gap-2">
+                {onOpenTeamExportImport && (
+                  <button
+                    type="button"
+                    onClick={() => closeMenuAndRun(() => onOpenTeamExportImport('import'))}
+                    className="flex items-center gap-2 px-3 py-2.5 rounded-xl bg-slate-900 border border-emerald-500/30 text-emerald-300 font-bold text-xs"
+                  >
+                    <Upload className="w-4 h-4 shrink-0" />
+                    <span className="truncate">Importuj skład</span>
+                  </button>
+                )}
+
                 {onOpenShareModal && (
                   <button
                     type="button"

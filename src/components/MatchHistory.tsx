@@ -30,6 +30,7 @@ import {
   Layers,
 } from 'lucide-react';
 import { playClickSound, triggerHaptic } from '../services/tts';
+import { getPlayerFullName, hasAnyPersonalData } from '../services/playerDisplay';
 import { useLanguage } from '../i18n/LanguageContext';
 import { ResumeMatchConfirmModal } from './ResumeMatchConfirmModal';
 
@@ -72,9 +73,11 @@ export const MatchHistory: React.FC<MatchHistoryProps> = ({
   // Player comparison state
   const [comparePlayer1Id, setComparePlayer1Id] = useState<string>('');
   const [comparePlayer2Id, setComparePlayer2Id] = useState<string>('');
+  const [includePersonalData, setIncludePersonalData] = useState<boolean>(false);
 
   const teamMatches = matches;
   const teamPlayers = players;
+  const hasPii = useMemo(() => hasAnyPersonalData(players), [players]);
 
   // Extract all unique seasons present in matches + DEFAULT_SEASONS
   const availableSeasons = useMemo(() => {
@@ -292,6 +295,19 @@ export const MatchHistory: React.FC<MatchHistoryProps> = ({
       {/* TAB 1: LISTA MECZÓW */}
       {activeTab === 'matches' && (
         <div className="space-y-4">
+          {hasPii && (
+            <label className="flex items-center gap-2.5 px-3.5 py-2.5 rounded-xl bg-slate-900 border border-slate-800 cursor-pointer select-none text-xs text-slate-300 hover:border-slate-700 transition">
+              <input
+                type="checkbox"
+                checked={includePersonalData}
+                onChange={(e) => setIncludePersonalData(e.target.checked)}
+                className="w-4 h-4 accent-amber-500 rounded cursor-pointer"
+              />
+              <span>
+                Dołącz dane osobowe do PDF/CSV (imiona, nazwiska, zdjęcia) — domyślnie eksport zawiera tylko numery
+              </span>
+            </label>
+          )}
           {/* Season & Sorting Filter Bar */}
           <div className="bg-slate-900 border border-slate-800 rounded-2xl p-3 sm:p-4 space-y-3 shadow-lg">
             <div className="flex flex-col md:flex-row md:items-center justify-between gap-3">
@@ -584,6 +600,7 @@ export const MatchHistory: React.FC<MatchHistoryProps> = ({
                             includeBoxScore: true,
                             includePlayByPlay: true,
                             includePlayerPages: true,
+                            includePersonalData,
                           });
                         }}
                         className="p-2 rounded-xl bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 border border-amber-500/40 transition active:scale-95"
@@ -593,7 +610,14 @@ export const MatchHistory: React.FC<MatchHistoryProps> = ({
                       </button>
 
                       <button
-                        onClick={() => exportMatchBoxScoreCsv(match, players.filter((p) => match.rosterPlayerIds.includes(p.id)))}
+                        onClick={() =>
+                          exportMatchBoxScoreCsv(
+                            match,
+                            players.filter((p) => match.rosterPlayerIds.includes(p.id)),
+                            clubProfile?.name,
+                            includePersonalData
+                          )
+                        }
                         className="p-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 transition"
                         title={t('box.exportCsvBtn')}
                       >
@@ -622,12 +646,27 @@ export const MatchHistory: React.FC<MatchHistoryProps> = ({
       {/* TAB 2: ŚREDNIE SEZONU */}
       {activeTab === 'averages' && (
         <div className="space-y-4">
-          <div className="flex items-center justify-between gap-2 bg-slate-900/60 p-3 rounded-xl border border-slate-800">
-            <span className="text-xs font-semibold text-slate-300">
-              Podsumowanie występów drużyny ({seasonFilteredMatches.length} meczów)
-            </span>
+          <div className="flex items-center justify-between gap-2 bg-slate-900/60 p-3 rounded-xl border border-slate-800 flex-wrap">
+            <div className="flex items-center gap-3 flex-wrap">
+              <span className="text-xs font-semibold text-slate-300">
+                Podsumowanie występów drużyny ({seasonFilteredMatches.length} meczów)
+              </span>
+              {hasPii && (
+                <label className="flex items-center gap-2 cursor-pointer select-none text-xs text-slate-300">
+                  <input
+                    type="checkbox"
+                    checked={includePersonalData}
+                    onChange={(e) => setIncludePersonalData(e.target.checked)}
+                    className="w-4 h-4 accent-amber-500 rounded cursor-pointer"
+                  />
+                  <span>Dołącz imiona i nazwiska do CSV</span>
+                </label>
+              )}
+            </div>
             <button
-              onClick={() => exportSeasonStatsCsv('', seasonAverages, seasonFilteredMatches.length, clubProfile?.name)}
+              onClick={() =>
+                exportSeasonStatsCsv('', seasonAverages, seasonFilteredMatches.length, clubProfile?.name, includePersonalData)
+              }
               className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-amber-500 hover:bg-amber-400 text-slate-950 text-xs font-bold transition active:scale-95 shadow-sm"
             >
               <Download className="w-3.5 h-3.5" />
@@ -865,7 +904,7 @@ export const MatchHistory: React.FC<MatchHistoryProps> = ({
                 <option value="">-- Wybierz zawodnika 1 --</option>
                 {teamPlayers.map((p) => (
                   <option key={p.id} value={p.id}>
-                    #{p.number} {p.firstName} {p.lastName}
+                    #{p.number} {getPlayerFullName(p)}
                   </option>
                 ))}
               </select>
@@ -881,7 +920,7 @@ export const MatchHistory: React.FC<MatchHistoryProps> = ({
                 <option value="">-- Wybierz zawodnika 2 --</option>
                 {teamPlayers.map((p) => (
                   <option key={p.id} value={p.id}>
-                    #{p.number} {p.firstName} {p.lastName}
+                    #{p.number} {getPlayerFullName(p)}
                   </option>
                 ))}
               </select>
@@ -1026,6 +1065,7 @@ export const MatchHistory: React.FC<MatchHistoryProps> = ({
           isOpen={true}
           onClose={() => setViewingPlayByPlay(null)}
           match={viewingPlayByPlay}
+          rosterPlayers={players}
           onDeleteEvent={readOnly ? undefined : () => {}}
         />
       )}

@@ -10,6 +10,7 @@ import {
 } from '../types/basketball';
 import { calculatePlayerStats, calculateTeamStats } from './statsCalculator';
 import { getClubProfile } from './db';
+import { getPlayerFullName, resolveEventPlayerLabel } from './playerDisplay';
 
 let cachedRegularFontBase64: string | null = null;
 let cachedBoldFontBase64: string | null = null;
@@ -139,9 +140,11 @@ export async function exportMatchPdf(
     includeBoxScore?: boolean;
     includePlayByPlay?: boolean;
     includePlayerPages?: boolean;
+    includePersonalData?: boolean;
     titleSuffix?: string;
-  } = { includeBoxScore: true, includePlayByPlay: true, includePlayerPages: true }
+  } = { includeBoxScore: true, includePlayByPlay: true, includePlayerPages: true, includePersonalData: false }
 ) {
+  const allowPii = Boolean(options.includePersonalData);
   const doc = await preparePdfDocument('landscape');
   const fontName = cachedRegularFontBase64 ? 'LiberationSans' : 'helvetica';
   const pageWidth = doc.internal.pageSize.getWidth();
@@ -251,7 +254,7 @@ export async function exportMatchPdf(
 
     const bodyRows = playerStatsList.map((s) => [
       `#${s.playerNumber}`,
-      s.playerName,
+      allowPii ? s.playerName : `Zawodnik #${s.playerNumber}`,
       s.pts,
       s.plusMinus > 0 ? `+${s.plusMinus}` : `${s.plusMinus}`,
       `${s.fg2m}/${s.fg2a}`,
@@ -373,7 +376,9 @@ export async function exportMatchPdf(
 
     doc.setFont(fontName, 'normal');
     doc.setFontSize(8);
-    const leadersText = `Punkty: ${topScorer ? `${topScorer.playerName} (${topScorer.pts} pkt)` : '-'}     |     Zbiórki: ${topReb ? `${topReb.playerName} (${topReb.totReb} zb)` : '-'}     |     Asysty: ${topAst ? `${topAst.playerName} (${topAst.ast} ast)` : '-'}     |     EVAL: ${topEval ? `${topEval.playerName} (${topEval.eval})` : '-'}`;
+    const leaderLabel = (s?: PlayerMatchStats) =>
+      s ? (allowPii ? s.playerName : `Zawodnik #${s.playerNumber}`) : '-';
+    const leadersText = `Punkty: ${topScorer ? `${leaderLabel(topScorer)} (${topScorer.pts} pkt)` : '-'}     |     Zbiórki: ${topReb ? `${leaderLabel(topReb)} (${topReb.totReb} zb)` : '-'}     |     Asysty: ${topAst ? `${leaderLabel(topAst)} (${topAst.ast} ast)` : '-'}     |     EVAL: ${topEval ? `${leaderLabel(topEval)} (${topEval.eval})` : '-'}`;
     doc.text(leadersText, 55, currentY);
 
     currentY += 5;
@@ -439,11 +444,12 @@ export async function exportMatchPdf(
     const pbpRows = match.events.map((e, idx) => {
       const baseDesc = ACTION_DESCRIPTIONS[e.type] || e.type.replace('_', ' ');
       const desc = e.subType ? `${baseDesc} (${e.subType})` : baseDesc;
-      const playerStr = e.playerName
-        ? `#${e.playerNumber || ''} ${e.playerName}`
-        : e.team === 'our'
-        ? clubProfile.name
-        : match.opponent || 'Przeciwnik';
+      const playerStr =
+        e.team === 'opp' || e.type.startsWith('OPP')
+          ? match.opponent || 'Przeciwnik'
+          : e.playerId || e.playerNumber !== undefined
+          ? resolveEventPlayerLabel(e, rosterPlayers, allowPii)
+          : clubProfile.name;
 
       return [
         idx + 1,
@@ -539,9 +545,9 @@ export async function exportMatchPdf(
       doc.setDrawColor(226, 232, 240);
       doc.roundedRect(14, 25, 72, 173, 3, 3, 'FD');
 
-      // Player Photo Frame (x: 20, y: 30, w: 60, h: 60)
+      // Player Photo Frame (x: 20, y: 30, w: 60, h: 60) — rendered only when personal data opt-in is enabled
       let photoRendered = false;
-      if (player.photo) {
+      if (allowPii && player.photo) {
         try {
           const imgObj = await loadImageForPdf(player.photo);
           if (imgObj) {
@@ -585,8 +591,12 @@ export async function exportMatchPdf(
 
       doc.setFontSize(9.5);
       doc.setTextColor(255, 255, 255);
-      const fullName = `${player.firstName} ${player.lastName}`;
-      doc.text(fullName.length > 17 ? `${player.firstName[0]}. ${player.lastName}` : fullName, 34, 102);
+      const rawFullName = allowPii ? getPlayerFullName(player) : `Zawodnik #${player.number}`;
+      const shortBannerName =
+        allowPii && rawFullName.length > 17 && player.firstName?.trim() && player.lastName?.trim()
+          ? `${player.firstName.trim()[0]}. ${player.lastName.trim()}`
+          : rawFullName;
+      doc.text(shortBannerName, 34, 102);
 
       // Player Meta Info
       doc.setFont(fontName, 'bold');
@@ -620,7 +630,7 @@ export async function exportMatchPdf(
         doc.text(season, 45, 126);
       }
 
-      if (player.notes) {
+      if (allowPii && player.notes) {
         doc.setFont(fontName, 'bold');
         doc.setTextColor(71, 85, 105);
         doc.text('Notatki:', 20, 132);
@@ -857,7 +867,10 @@ export async function exportMatchPdf(
           doc.setFont(fontName, 'bold');
           doc.setFontSize(13);
           doc.setTextColor(245, 158, 11);
-          doc.text(`${clubName} • #${player.number} ${player.firstName} ${player.lastName} • PEŁNA KRONIKA AKCJI MECZOWYCH (KONTYNUACJA)`, 14, 9);
+          const contHeaderName = allowPii
+            ? `#${player.number} ${getPlayerFullName(player)}`
+            : `Zawodnik #${player.number}`;
+          doc.text(`${clubName} • ${contHeaderName} • PEŁNA KRONIKA AKCJI MECZOWYCH (KONTYNUACJA)`, 14, 9);
 
           doc.setFont(fontName, 'normal');
           doc.setFontSize(8);
@@ -935,7 +948,10 @@ export async function exportMatchPdf(
                 doc.setFont(fontName, 'bold');
                 doc.setFontSize(12);
                 doc.setTextColor(245, 158, 11);
-                doc.text(`${clubName} • #${player.number} ${player.firstName} ${player.lastName} • PEŁNA KRONIKA AKCJI (KONTYNUACJA)`, 14, 9);
+                const contHeaderName2 = allowPii
+                  ? `#${player.number} ${getPlayerFullName(player)}`
+                  : `Zawodnik #${player.number}`;
+                doc.text(`${clubName} • ${contHeaderName2} • PEŁNA KRONIKA AKCJI (KONTYNUACJA)`, 14, 9);
                 doc.setFont(fontName, 'normal');
                 doc.setFontSize(8);
                 doc.setTextColor(226, 232, 240);
@@ -975,19 +991,29 @@ export async function exportMatchPdf(
 }
 
 // 2. Export Only Box Score to PDF
-export async function exportBoxScorePdf(match: Match, rosterPlayers: Player[]) {
+export async function exportBoxScorePdf(
+  match: Match,
+  rosterPlayers: Player[],
+  options?: { includePersonalData?: boolean }
+) {
   return exportMatchPdf(match, rosterPlayers, {
     includeBoxScore: true,
     includePlayByPlay: false,
+    includePersonalData: options?.includePersonalData ?? false,
     titleSuffix: 'BoxScore',
   });
 }
 
 // 3. Export Only Play-by-Play to PDF
-export async function exportPlayByPlayPdf(match: Match) {
-  return exportMatchPdf(match, [], {
+export async function exportPlayByPlayPdf(
+  match: Match,
+  rosterPlayers: Player[] = [],
+  options?: { includePersonalData?: boolean }
+) {
+  return exportMatchPdf(match, rosterPlayers, {
     includeBoxScore: false,
     includePlayByPlay: true,
+    includePersonalData: options?.includePersonalData ?? false,
     titleSuffix: 'PlayByPlay',
   });
 }

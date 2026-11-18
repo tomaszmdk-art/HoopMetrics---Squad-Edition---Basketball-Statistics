@@ -1,4 +1,5 @@
 import { ActionType, Match, MatchEvent, Player, PlayerMatchStats, TeamMatchStats, QuarterScores, PlayerCareerAverages } from '../types/basketball';
+import { getPlayerFullName } from './playerDisplay';
 
 export function calculatePlayerStats(
   player: Player,
@@ -122,7 +123,7 @@ export function calculatePlayerStats(
   return {
     playerId: player.id,
     playerNumber: player.number,
-    playerName: `${player.firstName} ${player.lastName}`,
+    playerName: getPlayerFullName(player),
     pts,
     plusMinus,
     fg2m,
@@ -358,7 +359,7 @@ export function calculateSeasonAverages(
 
       return {
         playerId: player.id,
-        playerName: `${player.firstName} ${player.lastName}`,
+        playerName: getPlayerFullName(player),
         playerNumber: player.number,
         gamesPlayed,
         totalPts,

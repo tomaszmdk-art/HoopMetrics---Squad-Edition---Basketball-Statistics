@@ -245,7 +245,6 @@ export const LiveMatch: React.FC<LiveMatchProps> = ({
         team: isOurTeam ? 'our' : 'opp',
         points: pointsScored,
         playerId: isOurTeam && selectedPlayer ? selectedPlayer.id : undefined,
-        playerName: isOurTeam && selectedPlayer ? `${selectedPlayer.firstName} ${selectedPlayer.lastName}` : undefined,
         playerNumber: isOurTeam && selectedPlayer ? selectedPlayer.number : undefined,
         subType: subType,
         onCourtPlayerIds: [...(currentMatch.onCourtPlayerIds || [])],
@@ -274,8 +273,8 @@ export const LiveMatch: React.FC<LiveMatchProps> = ({
       let tpl = ACTION_VOICE_TEMPLATES[type] || type;
       if (selectedPlayer && isOurTeam) {
         const playerLabel = subType
-          ? `#${selectedPlayer.number} ${selectedPlayer.lastName}, ${subType}`
-          : `#${selectedPlayer.number} ${selectedPlayer.lastName}`;
+          ? `numer ${selectedPlayer.number}, ${subType}`
+          : `numer ${selectedPlayer.number}`;
         tpl = tpl.replace('{player}', playerLabel);
       } else {
         tpl = tpl.replace('{player}', '');
@@ -335,7 +334,6 @@ export const LiveMatch: React.FC<LiveMatchProps> = ({
           team: isOurTeam ? 'our' : 'opp',
           points: pointsScored,
           playerId: isOurTeam && ply ? ply.id : undefined,
-          playerName: isOurTeam && ply ? `${ply.firstName} ${ply.lastName}` : undefined,
           playerNumber: isOurTeam && ply ? ply.number : undefined,
           onCourtPlayerIds: [...(currentMatch.onCourtPlayerIds || [])],
           ourScoreAfter: currentMatch.ourScore, // will be properly updated by recalculateMatchScores
@@ -472,9 +470,6 @@ export const LiveMatch: React.FC<LiveMatchProps> = ({
                           team: 'our' as const,
                           points: 2,
                           playerId: rosterPlayers[0]?.id,
-                          playerName: rosterPlayers[0]
-                            ? `${rosterPlayers[0].firstName} ${rosterPlayers[0].lastName}`
-                            : 'Wojciech Lenart',
                           playerNumber: rosterPlayers[0]?.number ?? 10,
                           subType: 'Wjazd pod kosz (Layup)',
                           ourScoreAfter: match.ourScore,
@@ -676,6 +671,7 @@ export const LiveMatch: React.FC<LiveMatchProps> = ({
         isOpen={showPlayByPlay}
         onClose={() => setShowPlayByPlay(false)}
         match={match}
+        rosterPlayers={rosterPlayers.length > 0 ? rosterPlayers : players}
         onDeleteEvent={!readOnly ? handleDeleteEvent : undefined}
       />
 

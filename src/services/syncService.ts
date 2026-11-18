@@ -1,5 +1,10 @@
 import { ClubProfile, Match, Player, RoomPublicInfo } from '../types/basketball';
 import { getCurrentRoomId, getRoomStorageKey } from './db';
+import {
+  sanitizeClubProfileForServer,
+  sanitizeMatchForServer,
+  sanitizePlayerForServer,
+} from './playerDisplay';
 
 export interface ServerSyncData {
   roomId?: string;
@@ -243,10 +248,11 @@ export function addLocalDeletedMatchIds(ids: string[], roomIdOverride?: string |
 
 export async function createRoomOnServer(payload: CreateRoomPayload): Promise<CreateRoomResult> {
   try {
+    const { headCoach: _ignoredCoach, ...safePayload } = payload;
     const res = await fetch('/api/rooms', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload),
+      body: JSON.stringify(safePayload),
     });
     const contentType = res.headers.get('content-type') || '';
     if (!contentType.includes('application/json')) {
@@ -364,13 +370,26 @@ export async function pushRoomStateImmediate(
   }
 
   try {
+    const safePayload = {
+      ...payload,
+      ...(Array.isArray(payload.matches)
+        ? { matches: payload.matches.map(sanitizeMatchForServer) }
+        : {}),
+      ...(Array.isArray(payload.players)
+        ? { players: payload.players.map(sanitizePlayerForServer) }
+        : {}),
+      ...(payload.clubProfile
+        ? { clubProfile: sanitizeClubProfileForServer(payload.clubProfile) }
+        : {}),
+    };
+
     const res = await fetch(`/api/rooms/${encodeURIComponent(roomId)}/state`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
         'x-coach-token': coachToken,
       },
-      body: JSON.stringify(payload),
+      body: JSON.stringify(safePayload),
     });
     if (res.status === 401 || res.status === 403) {
       return { success: false, unauthorized: true };

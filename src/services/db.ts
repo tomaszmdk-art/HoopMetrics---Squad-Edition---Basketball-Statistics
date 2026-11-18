@@ -637,9 +637,14 @@ export async function importDataFromJson(jsonStr: string): Promise<{
     await saveMatchesBulk(validMatches);
   }
 
-  const validPlayers: Player[] = rawPlayers.filter(
-    (p: any): p is Player => p && typeof p.id === 'string' && typeof p.lastName === 'string'
-  );
+  const validPlayers: Player[] = rawPlayers
+    .filter((p: any): p is Player => p && typeof p.id === 'string' && typeof p.number === 'number')
+    .map((p) => ({
+      ...p,
+      teamCategory: p.teamCategory || 'TEAM',
+      firstName: typeof p.firstName === 'string' ? p.firstName : '',
+      lastName: typeof p.lastName === 'string' ? p.lastName : '',
+    }));
 
   if (validPlayers.length > 0) {
     await savePlayersBulk(validPlayers);

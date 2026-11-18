@@ -115,11 +115,11 @@ export function extractPlayerNumber(
     }
   }
 
-  // 3. Match by player last name or first name from roster
+  // 3. Match by player last name or first name from roster (locally only; guard non-empty)
   for (const p of roster) {
-    const last = p.lastName.toLowerCase();
-    const first = p.firstName.toLowerCase();
-    if (clean.includes(last) || clean.includes(first)) {
+    const last = (p.lastName || '').trim().toLowerCase();
+    const first = (p.firstName || '').trim().toLowerCase();
+    if ((last && clean.includes(last)) || (first && clean.includes(first))) {
       return { number: p.number, player: p };
     }
   }
@@ -456,9 +456,6 @@ export function parseBasketballVoiceCommand(
           actionType: sm.action.type,
           playerId: !isOpp ? activePlayerContext?.id : undefined,
           playerNumber: !isOpp ? (activePlayerNumber ?? activePlayerContext?.number) : undefined,
-          playerName: !isOpp && activePlayerContext
-            ? `${activePlayerContext.firstName} ${activePlayerContext.lastName}`
-            : undefined,
           team: isOpp ? 'opp' : 'our',
           label: isOpp
             ? sm.action.label
@@ -471,7 +468,6 @@ export function parseBasketballVoiceCommand(
         actionType: 'MANUAL_OUR_PLUS_1', // dummy
         playerId: activePlayerContext?.id,
         playerNumber: activePlayerNumber,
-        playerName: activePlayerContext ? `${activePlayerContext.firstName} ${activePlayerContext.lastName}` : undefined,
         team: 'our',
         label: `Wybór gracza #${activePlayerNumber}`,
         isSelectPlayerOnly: true,
@@ -492,7 +488,6 @@ export function parseBasketballVoiceCommand(
         actionType: matched.action.type,
         playerId: !isOpp ? ply?.id : undefined,
         playerNumber: !isOpp ? num : undefined,
-        playerName: !isOpp && ply ? `${ply.firstName} ${ply.lastName}` : undefined,
         team: isOpp ? 'opp' : 'our',
         label: isOpp ? matched.action.label : `${matched.action.label} ${num ? `(#${num})` : ''}`.trim(),
       });
@@ -533,7 +528,6 @@ export async function parseWithGeminiFallback(
         players: roster.map((p) => ({
           id: p.id,
           number: p.number,
-          name: `${p.firstName} ${p.lastName}`,
         })),
       }),
     });

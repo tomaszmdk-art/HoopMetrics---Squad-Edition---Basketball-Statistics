@@ -13,6 +13,7 @@ import {
   TeamExportPackage,
 } from '../services/teamTransferService';
 import { playClickSound, triggerHaptic } from '../services/tts';
+import { getPlayerShortName } from '../services/playerDisplay';
 import {
   Download,
   Upload,
@@ -50,6 +51,7 @@ interface TeamExportImportModalProps {
     updatedClub?: ClubProfile
   ) => void;
   defaultTab?: 'export' | 'import';
+  readOnly?: boolean;
 }
 
 export const TeamExportImportModal: React.FC<TeamExportImportModalProps> = ({
@@ -60,8 +62,9 @@ export const TeamExportImportModal: React.FC<TeamExportImportModalProps> = ({
   matches,
   onDataImported,
   defaultTab = 'export',
+  readOnly = false,
 }) => {
-  const [activeTab, setActiveTab] = useState<'export' | 'import'>(defaultTab);
+  const [activeTab, setActiveTab] = useState<'export' | 'import'>(readOnly ? 'import' : defaultTab);
 
   // Export State (always full team)
   const exportCategory: 'ALL' = 'ALL';
@@ -86,12 +89,12 @@ export const TeamExportImportModal: React.FC<TeamExportImportModalProps> = ({
   // When modal opens, sync default tab
   useEffect(() => {
     if (isOpen) {
-      setActiveTab(defaultTab);
+      setActiveTab(readOnly ? 'import' : defaultTab);
       setImportSuccessMsg(null);
       setImportErrorMsg(null);
       setExportSuccessMessage(null);
     }
-  }, [isOpen, defaultTab]);
+  }, [isOpen, defaultTab, readOnly]);
 
   if (!isOpen) return null;
 
@@ -237,13 +240,16 @@ export const TeamExportImportModal: React.FC<TeamExportImportModalProps> = ({
         importMode,
         clubProfile,
         players,
-        matches
+        matches,
+        !readOnly
       );
 
       onDataImported(result.updatedMatches, result.updatedPlayers, result.updatedClub);
 
       setImportSuccessMsg(
-        `Sukces! Zaimportowano: ${result.importedPlayersCount} zawodników (${result.importedPhotosCount} ze zdjęciami), ${result.importedMatchesCount} meczów oraz zaktualizowano dane klubu "${result.updatedClub.name}".`
+        readOnly
+          ? `Sukces! Zapisano lokalnie na tym urządzeniu: ${result.importedPlayersCount} zawodników (${result.importedPhotosCount} ze zdjęciami). Dane osobowe nie są wysyłane na serwer.`
+          : `Sukces! Zaimportowano: ${result.importedPlayersCount} zawodników (${result.importedPhotosCount} ze zdjęciami), ${result.importedMatchesCount} meczów oraz zaktualizowano dane klubu "${result.updatedClub.name}".`
       );
       setImportPreview(null);
       setImportJsonText('');
@@ -267,13 +273,15 @@ export const TeamExportImportModal: React.FC<TeamExportImportModalProps> = ({
             </div>
             <div className="min-w-0">
               <h2 className="text-base sm:text-lg font-black text-white flex items-center gap-2 flex-wrap">
-                <span>Eksport & Import Drużyny</span>
+                <span>{readOnly ? 'Import Składu Drużyny (Lokalnie)' : 'Eksport & Import Drużyny'}</span>
                 <span className="text-[10px] sm:text-xs px-2 py-0.5 rounded-full bg-amber-500/20 text-amber-400 border border-amber-500/30 font-bold">
-                  JSON + E-mail ✉️
+                  {readOnly ? 'RODO Safe • Tylko na tym urządzeniu' : 'JSON + E-mail ✉️'}
                 </span>
               </h2>
               <p className="text-xs text-slate-400 truncate">
-                Dane klubu, zdjęcia i dane zawodników oraz wyniki spotkań
+                {readOnly
+                  ? 'Wczytaj plik od trenera, aby widzieć imiona, nazwiska i zdjęcia wyłącznie na tym urządzeniu'
+                  : 'Dane klubu, zdjęcia i dane zawodników oraz wyniki spotkań'}
               </p>
             </div>
           </div>
@@ -287,44 +295,46 @@ export const TeamExportImportModal: React.FC<TeamExportImportModalProps> = ({
         </div>
 
         {/* Tab Switcher */}
-        <div className="flex border-b border-slate-800 bg-slate-950/70 p-1.5 gap-1.5 shrink-0">
-          <button
-            type="button"
-            onClick={() => {
-              playClickSound();
-              setActiveTab('export');
-            }}
-            className={`flex-1 py-2.5 rounded-xl text-xs sm:text-sm font-bold flex items-center justify-center gap-2 transition ${
-              activeTab === 'export'
-                ? 'bg-gradient-to-r from-amber-500 to-orange-500 text-slate-950 shadow-md shadow-amber-950/40'
-                : 'text-slate-400 hover:text-white hover:bg-slate-800/60'
-            }`}
-          >
-            <Download className="w-4 h-4" />
-            <span>1. Eksportuj Drużynę (JSON & E-mail)</span>
-          </button>
+        {!readOnly && (
+          <div className="flex border-b border-slate-800 bg-slate-950/70 p-1.5 gap-1.5 shrink-0">
+            <button
+              type="button"
+              onClick={() => {
+                playClickSound();
+                setActiveTab('export');
+              }}
+              className={`flex-1 py-2.5 rounded-xl text-xs sm:text-sm font-bold flex items-center justify-center gap-2 transition ${
+                activeTab === 'export'
+                  ? 'bg-gradient-to-r from-amber-500 to-orange-500 text-slate-950 shadow-md shadow-amber-950/40'
+                  : 'text-slate-400 hover:text-white hover:bg-slate-800/60'
+              }`}
+            >
+              <Download className="w-4 h-4" />
+              <span>1. Eksportuj Drużynę (JSON & E-mail)</span>
+            </button>
 
-          <button
-            type="button"
-            onClick={() => {
-              playClickSound();
-              setActiveTab('import');
-            }}
-            className={`flex-1 py-2.5 rounded-xl text-xs sm:text-sm font-bold flex items-center justify-center gap-2 transition ${
-              activeTab === 'import'
-                ? 'bg-gradient-to-r from-emerald-500 to-teal-500 text-slate-950 shadow-md shadow-emerald-950/40'
-                : 'text-slate-400 hover:text-white hover:bg-slate-800/60'
-            }`}
-          >
-            <Upload className="w-4 h-4" />
-            <span>2. Importuj Drużynę (Plik JSON)</span>
-          </button>
-        </div>
+            <button
+              type="button"
+              onClick={() => {
+                playClickSound();
+                setActiveTab('import');
+              }}
+              className={`flex-1 py-2.5 rounded-xl text-xs sm:text-sm font-bold flex items-center justify-center gap-2 transition ${
+                activeTab === 'import'
+                  ? 'bg-gradient-to-r from-emerald-500 to-teal-500 text-slate-950 shadow-md shadow-emerald-950/40'
+                  : 'text-slate-400 hover:text-white hover:bg-slate-800/60'
+              }`}
+            >
+              <Upload className="w-4 h-4" />
+              <span>2. Importuj Drużynę (Plik JSON)</span>
+            </button>
+          </div>
+        )}
 
         {/* Body content */}
         <div className="p-4 sm:p-5 overflow-y-auto space-y-4 text-xs sm:text-sm flex-1">
           {/* TAB 1: EXPORT */}
-          {activeTab === 'export' && (
+          {!readOnly && activeTab === 'export' && (
             <div className="space-y-4">
               {/* Photo toggle */}
               <div className="bg-slate-950/80 p-4 rounded-2xl border border-slate-800 space-y-3">
@@ -567,8 +577,17 @@ export const TeamExportImportModal: React.FC<TeamExportImportModalProps> = ({
           )}
 
           {/* TAB 2: IMPORT */}
-          {activeTab === 'import' && (
+          {(readOnly || activeTab === 'import') && (
             <div className="space-y-4">
+              {readOnly && (
+                <div className="p-3.5 rounded-2xl bg-emerald-950/40 border border-emerald-500/30 text-emerald-200 flex items-start gap-2.5 text-xs leading-relaxed">
+                  <Shield className="w-4 h-4 text-emerald-400 shrink-0 mt-0.5" />
+                  <div>
+                    <strong className="text-emerald-300 block mb-0.5">Prywatność i bezpieczeństwo (RODO):</strong>
+                    Serwer meczu przechowuje wyłącznie numery na koszulkach. Wczytaj tutaj plik JSON otrzymany od trenera, aby w Twojej przeglądarce (lokalnie) wyświetlały się imiona, nazwiska i zdjęcia zawodników — dane nie zostaną nigdzie wysłane.
+                  </div>
+                </div>
+              )}
               {/* File upload drag and drop zone */}
               <div
                 onDragOver={handleDragOver}
@@ -708,7 +727,7 @@ export const TeamExportImportModal: React.FC<TeamExportImportModalProps> = ({
                             {p.photo ? (
                               <img
                                 src={p.photo}
-                                alt={p.lastName}
+                                alt={getPlayerShortName(p)}
                                 className="w-8 h-8 rounded-lg object-cover border border-amber-500/50"
                               />
                             ) : (
@@ -717,7 +736,7 @@ export const TeamExportImportModal: React.FC<TeamExportImportModalProps> = ({
                               </div>
                             )}
                             <span className="text-[9px] font-semibold text-slate-300 truncate w-full">
-                              {p.lastName}
+                              {getPlayerShortName(p)}
                             </span>
                           </div>
                         ))}

@@ -26,6 +26,7 @@ import {
 } from 'lucide-react';
 import { playClickSound, triggerHaptic } from '../services/tts';
 import { compressFileToDataUrl, processPastedImage } from '../services/imageUtils';
+import { getPlayerFullName, getPlayerShortName } from '../services/playerDisplay';
 import { useLanguage } from '../i18n/LanguageContext';
 
 interface RosterManagementProps {
@@ -74,6 +75,7 @@ export const RosterManagement: React.FC<RosterManagementProps> = ({
       if (!search.trim()) return true;
       const q = search.toLowerCase();
       return (
+        getPlayerFullName(p).toLowerCase().includes(q) ||
         p.firstName.toLowerCase().includes(q) ||
         p.lastName.toLowerCase().includes(q) ||
         p.number.toString().includes(q)
@@ -134,8 +136,8 @@ export const RosterManagement: React.FC<RosterManagementProps> = ({
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
     setFormError(null);
-    if (!firstName.trim() || !lastName.trim() || !number.trim()) {
-      setFormError('Wypełnij imię, nazwisko oraz numer na koszulce.');
+    if (!number.trim()) {
+      setFormError('Podaj numer zawodnika na koszulce.');
       return;
     }
 
@@ -289,9 +291,22 @@ export const RosterManagement: React.FC<RosterManagementProps> = ({
         )}
 
         {readOnly && (
-          <div className="text-xs text-slate-400 flex items-center gap-2">
-            <span className="w-2 h-2 rounded-full bg-amber-400" />
-            <span>{t('roster.clickPrompt')}</span>
+          <div className="flex items-center gap-2 flex-wrap">
+            {onOpenTeamImport && (
+              <button
+                type="button"
+                onClick={onOpenTeamImport}
+                className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-emerald-500/15 hover:bg-emerald-500/25 text-emerald-300 border border-emerald-500/40 font-bold text-xs transition active:scale-95 shadow-sm"
+                title="Wczytaj plik JSON ze składem i zdjęciami od trenera (zapis lokalny na tym urządzeniu)"
+              >
+                <Upload className="w-3.5 h-3.5 text-emerald-400" />
+                <span>Importuj skład (zdjęcia/nazwiska)</span>
+              </button>
+            )}
+            <div className="text-xs text-slate-400 flex items-center gap-2">
+              <span className="w-2 h-2 rounded-full bg-amber-400" />
+              <span>{t('roster.clickPrompt')}</span>
+            </div>
           </div>
         )}
       </div>
@@ -328,7 +343,7 @@ export const RosterManagement: React.FC<RosterManagementProps> = ({
                       <div className="relative w-12 h-12 rounded-xl overflow-hidden shrink-0 border border-amber-500/40 shadow-inner group-hover:border-amber-400 bg-slate-950">
                         <img
                           src={player.photo}
-                          alt={player.lastName}
+                          alt={getPlayerShortName(player)}
                           className="w-full h-full object-cover"
                         />
                         <span className="absolute bottom-0 right-0 bg-slate-950/85 text-amber-400 text-[9px] font-mono font-black px-1 rounded-tl">
@@ -346,7 +361,7 @@ export const RosterManagement: React.FC<RosterManagementProps> = ({
 
                     <div className="min-w-0">
                       <h3 className="font-bold text-white text-sm sm:text-base truncate group-hover:text-amber-300 transition">
-                        {player.firstName} {player.lastName}
+                        {getPlayerFullName(player)}
                       </h3>
                       <div className="flex items-center gap-1.5 mt-0.5">
                         <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-slate-800 text-slate-400">
@@ -375,7 +390,7 @@ export const RosterManagement: React.FC<RosterManagementProps> = ({
                         type="button"
                         onClick={(e) => {
                           e.stopPropagation();
-                          handleDeleteClick(player.id, `${player.firstName} ${player.lastName}`);
+                          handleDeleteClick(player.id, getPlayerFullName(player));
                         }}
                         className="p-2 rounded-xl text-slate-400 hover:text-rose-400 hover:bg-rose-500/10 active:scale-90 transition cursor-pointer"
                         title={t('common.delete')}
@@ -452,6 +467,13 @@ export const RosterManagement: React.FC<RosterManagementProps> = ({
             </div>
 
             <form onSubmit={handleSave} className="space-y-3.5">
+              <div className="p-2.5 rounded-xl bg-emerald-950/40 border border-emerald-500/30 text-[11px] text-emerald-200 flex items-start gap-2 leading-snug">
+                <Shield className="w-3.5 h-3.5 text-emerald-400 shrink-0 mt-0.5" />
+                <span>
+                  Imię, nazwisko, zdjęcie i notatki zapisywane są wyłącznie lokalnie na tym urządzeniu (RODO). Na serwer trafia tylko numer na koszulce.
+                </span>
+              </div>
+
               {/* Photo Upload / Paste Section */}
               <div className="p-3 rounded-2xl bg-slate-950 border border-slate-800 space-y-2.5">
                 <div className="flex items-center justify-between">
@@ -519,10 +541,9 @@ export const RosterManagement: React.FC<RosterManagementProps> = ({
 
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="block text-xs font-bold text-slate-400 mb-1">{t('roster.firstName')}:</label>
+                  <label className="block text-xs font-bold text-slate-400 mb-1">{t('roster.firstName')} (opcjonalnie):</label>
                   <input
                     type="text"
-                    required
                     value={firstName}
                     onChange={(e) => setFirstName(e.target.value)}
                     placeholder="np. Jan"
@@ -530,10 +551,9 @@ export const RosterManagement: React.FC<RosterManagementProps> = ({
                   />
                 </div>
                 <div>
-                  <label className="block text-xs font-bold text-slate-400 mb-1">{t('roster.lastName')}:</label>
+                  <label className="block text-xs font-bold text-slate-400 mb-1">{t('roster.lastName')} (opcjonalnie):</label>
                   <input
                     type="text"
-                    required
                     value={lastName}
                     onChange={(e) => setLastName(e.target.value)}
                     placeholder="np. Kowalski"

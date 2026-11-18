@@ -18,6 +18,11 @@ import { exportPlayByPlayPdf } from '../services/exportPdf';
 import { exportPlayByPlayCsv } from '../services/exportCsv';
 import { playClickSound, triggerHaptic } from '../services/tts';
 import { useLanguage } from '../i18n/LanguageContext';
+import {
+  hasAnyPersonalData,
+  resolveEventAssistLabel,
+  resolveEventPlayerLabel,
+} from '../services/playerDisplay';
 
 interface LivePlayByPlayStreamProps {
   match: Match;
@@ -62,6 +67,8 @@ export const LivePlayByPlayStream: React.FC<LivePlayByPlayStreamProps> = ({
   const [selectedCategory, setSelectedCategory] = useState<string>('all');
   const [selectedPlayerId, setSelectedPlayerId] = useState<string>('all');
   const [isExportingPdf, setIsExportingPdf] = useState(false);
+  const [includePersonalData, setIncludePersonalData] = useState(false);
+  const hasPii = hasAnyPersonalData(rosterPlayers);
 
   const clubName = clubProfile?.shortName || clubProfile?.name || 'Nasz Zespół';
   const oppName = match.opponent || 'Rywal';
@@ -94,7 +101,7 @@ export const LivePlayByPlayStream: React.FC<LivePlayByPlayStreamProps> = ({
     playClickSound();
     triggerHaptic(30);
     try {
-      await exportPlayByPlayPdf(match);
+      await exportPlayByPlayPdf(match, rosterPlayers, { includePersonalData });
     } catch (err) {
       console.error('Błąd eksportu PDF:', err);
     } finally {
@@ -105,7 +112,7 @@ export const LivePlayByPlayStream: React.FC<LivePlayByPlayStreamProps> = ({
   const handleExportCsv = () => {
     playClickSound();
     triggerHaptic(25);
-    exportPlayByPlayCsv(match);
+    exportPlayByPlayCsv(match, rosterPlayers, includePersonalData);
   };
 
   // Quick stats by quarter
@@ -152,30 +159,47 @@ export const LivePlayByPlayStream: React.FC<LivePlayByPlayStreamProps> = ({
         </div>
 
         {/* Action buttons (PDF, CSV) */}
-        <div className="flex items-center gap-2 shrink-0">
-          <button
-            onClick={handleExportPdf}
-            disabled={isExportingPdf || match.events.length === 0}
-            className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-black text-xs transition active:scale-95 shadow-md shadow-amber-950/30 disabled:opacity-50 cursor-pointer"
-            title="Pobierz oficjalny protokół meczu w formacie PDF"
-          >
-            {isExportingPdf ? (
-              <Loader2 className="w-3.5 h-3.5 animate-spin" />
-            ) : (
-              <FileText className="w-3.5 h-3.5" />
-            )}
-            <span>Pobierz PDF</span>
-          </button>
+        <div className="flex flex-col items-start md:items-end gap-2 shrink-0">
+          <div className="flex items-center gap-2">
+            <button
+              onClick={handleExportPdf}
+              disabled={isExportingPdf || match.events.length === 0}
+              className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-black text-xs transition active:scale-95 shadow-md shadow-amber-950/30 disabled:opacity-50 cursor-pointer"
+              title="Pobierz oficjalny protokół meczu w formacie PDF"
+            >
+              {isExportingPdf ? (
+                <Loader2 className="w-3.5 h-3.5 animate-spin" />
+              ) : (
+                <FileText className="w-3.5 h-3.5" />
+              )}
+              <span>Pobierz PDF</span>
+            </button>
 
-          <button
-            onClick={handleExportCsv}
-            disabled={match.events.length === 0}
-            className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 font-bold text-xs transition active:scale-95 disabled:opacity-50 cursor-pointer"
-            title="Eksportuj protokół do pliku Excel / CSV"
-          >
-            <Download className="w-3.5 h-3.5 text-sky-400" />
-            <span>CSV</span>
-          </button>
+            <button
+              onClick={handleExportCsv}
+              disabled={match.events.length === 0}
+              className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 font-bold text-xs transition active:scale-95 disabled:opacity-50 cursor-pointer"
+              title="Eksportuj protokół do pliku Excel / CSV"
+            >
+              <Download className="w-3.5 h-3.5 text-sky-400" />
+              <span>CSV</span>
+            </button>
+          </div>
+
+          {hasPii && (
+            <label
+              className="flex items-center gap-2 text-[11px] font-semibold text-slate-300 bg-slate-950/80 border border-slate-800 px-2.5 py-1 rounded-xl cursor-pointer select-none hover:border-amber-500/40 transition"
+              title="Domyślnie protokół PDF i CSV zawiera wyłącznie numery zawodników"
+            >
+              <input
+                type="checkbox"
+                checked={includePersonalData}
+                onChange={(e) => setIncludePersonalData(e.target.checked)}
+                className="w-3.5 h-3.5 rounded accent-amber-500 cursor-pointer"
+              />
+              <span>Dołącz dane osobowe do PDF/CSV</span>
+            </label>
+          )}
         </div>
       </div>
 
@@ -315,9 +339,9 @@ export const LivePlayByPlayStream: React.FC<LivePlayByPlayStreamProps> = ({
                     <div className="min-w-0 flex-1 space-y-1">
                       <div className="flex items-center gap-2 flex-wrap">
                         {/* Player / Team Name */}
-                        {e.playerNumber !== undefined ? (
+                        {e.playerId || e.playerNumber !== undefined ? (
                           <span className="font-mono font-black text-amber-400 text-xs sm:text-sm">
-                            #{e.playerNumber} {e.playerName}
+                            {resolveEventPlayerLabel(e, rosterPlayers, true)}
                           </span>
                         ) : (
                           <span className="text-xs font-bold text-slate-300">
@@ -348,13 +372,17 @@ export const LivePlayByPlayStream: React.FC<LivePlayByPlayStreamProps> = ({
                       </div>
 
                       {/* Assist Callout */}
-                      {e.assistedByPlayerName && (
-                        <div className="text-[11px] text-sky-400 font-medium flex items-center gap-1">
-                          <span className="text-slate-500">↳</span>
-                          <span>Asysta:</span>
-                          <strong className="text-sky-300">{e.assistedByPlayerName}</strong>
-                        </div>
-                      )}
+                      {(() => {
+                        const assistLabel = resolveEventAssistLabel(e, rosterPlayers, true);
+                        if (!assistLabel) return null;
+                        return (
+                          <div className="text-[11px] text-sky-400 font-medium flex items-center gap-1">
+                            <span className="text-slate-500">↳</span>
+                            <span>Asysta:</span>
+                            <strong className="text-sky-300">{assistLabel}</strong>
+                          </div>
+                        );
+                      })()}
                     </div>
                   </div>
 

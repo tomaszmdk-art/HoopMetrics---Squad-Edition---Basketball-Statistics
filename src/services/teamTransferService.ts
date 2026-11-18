@@ -10,6 +10,7 @@ import {
   deleteMatch,
 } from './db';
 import { pushServerStateImmediate } from './syncService';
+import { getPlayerFullName } from './playerDisplay';
 
 export interface TeamExportMetadata {
   categoryFilter: string; // 'ALL' or specific e.g. 'U13'
@@ -259,7 +260,7 @@ export function buildEmailDraft(
         const photoInfo = p.photo ? '📸 [ze zdjęciem]' : '▫️ [brak zdjęcia]';
         const posInfo = p.position ? `(${p.position})` : '';
         const notesInfo = p.notes ? ` • ${p.notes}` : '';
-        return `  #${p.number.toString().padStart(2, '0')} ${p.firstName} ${p.lastName} ${posInfo} ${photoInfo}${notesInfo}`;
+        return `  #${p.number.toString().padStart(2, '0')} ${getPlayerFullName(p)} ${posInfo} ${photoInfo}${notesInfo}`;
       })
       .join('\n');
   } else {
@@ -369,9 +370,14 @@ export function inspectImportJson(jsonStr: string): ImportPreviewResult {
 
     // Players
     const rawPlayers: unknown[] = Array.isArray(parsed.players) ? parsed.players : [];
-    const validPlayers: Player[] = rawPlayers.filter(
-      (p: any): p is Player => p && typeof p.id === 'string' && typeof p.lastName === 'string'
-    );
+    const validPlayers: Player[] = rawPlayers
+      .filter((p: any): p is Player => p && typeof p.id === 'string' && typeof p.number === 'number')
+      .map((p) => ({
+        ...p,
+        teamCategory: p.teamCategory || 'TEAM',
+        firstName: typeof p.firstName === 'string' ? p.firstName : '',
+        lastName: typeof p.lastName === 'string' ? p.lastName : '',
+      }));
 
     if (validMatches.length === 0 && validPlayers.length === 0 && !clubProfile) {
       return {
@@ -443,7 +449,8 @@ export async function executeTeamImport(
   mode: 'merge' | 'overwrite',
   currentClub: ClubProfile,
   currentPlayers: Player[],
-  currentMatches: Match[]
+  currentMatches: Match[],
+  pushToServer: boolean = true
 ): Promise<{
   updatedClub: ClubProfile;
   updatedPlayers: Player[];
@@ -483,29 +490,41 @@ export async function executeTeamImport(
     }
     finalPlayers = preview.players.map((p) => ({ ...p, teamCategory: p.teamCategory || 'TEAM' }));
   } else {
-    // Merge mode:
-    // Create map by id or (firstName + lastName + category)
+    // Merge mode: match by id first, otherwise by (number, teamCategory) preserving existing room player id
     const playerMap = new Map<string, Player>();
     for (const p of currentPlayers) {
       playerMap.set(p.id, p);
     }
 
     for (const p of preview.players) {
-      const existing = playerMap.get(p.id);
+      const pCategory = p.teamCategory || 'TEAM';
+      const existingById = playerMap.get(p.id);
+      const existingByNumber = !existingById
+        ? Array.from(playerMap.values()).find(
+            (cur) => cur.number === p.number && (cur.teamCategory || 'TEAM') === pCategory
+          )
+        : undefined;
+      const existing = existingById || existingByNumber;
+
       if (existing) {
-        // Merge attributes, preserve or update photo
         const merged: Player = {
           ...existing,
           ...p,
+          id: existing.id, // Preserve room player ID so live MatchEvent links keep resolving
+          teamCategory: pCategory,
+          firstName: p.firstName?.trim() ? p.firstName : (existing.firstName || ''),
+          lastName: p.lastName?.trim() ? p.lastName : (existing.lastName || ''),
           photo: p.photo || existing.photo,
+          notes: p.notes || existing.notes,
         };
-        playerMap.set(p.id, merged);
+        playerMap.set(existing.id, merged);
         await savePlayer(merged);
         if (merged.photo) importedPhotosCount++;
       } else {
-        playerMap.set(p.id, p);
-        await savePlayer(p);
-        if (p.photo) importedPhotosCount++;
+        const normalized: Player = { ...p, teamCategory: pCategory };
+        playerMap.set(normalized.id, normalized);
+        await savePlayer(normalized);
+        if (normalized.photo) importedPhotosCount++;
       }
     }
     finalPlayers = Array.from(playerMap.values()).sort((a, b) => a.number - b.number);
@@ -535,24 +554,26 @@ export async function executeTeamImport(
     finalMatches = Array.from(matchMap.values()).sort(
       (a, b) => (b.updatedAt || 0) - (a.updatedAt || 0)
     );
-    if (finalMatches.length > 0) {
+    if (preview.matches.length > 0 && finalMatches.length > 0) {
       await saveMatchesBulk(finalMatches);
     }
   }
 
-  // 4. Push to server state so other connected devices & spectator mode update immediately!
-  try {
-    const live = finalMatches.find((m) => m.status === 'live');
-    pushServerStateImmediate(
-      finalMatches,
-      finalPlayers,
-      live?.id || null,
-      undefined,
-      undefined,
-      finalClub
-    );
-  } catch (err) {
-    console.warn('Could not push imported state to server:', err);
+  // 4. Push to server state only when coach executes import (never push parent local PII to server)
+  if (pushToServer) {
+    try {
+      const live = finalMatches.find((m) => m.status === 'live');
+      pushServerStateImmediate(
+        finalMatches,
+        finalPlayers,
+        live?.id || null,
+        undefined,
+        undefined,
+        finalClub
+      );
+    } catch (err) {
+      console.warn('Could not push imported state to server:', err);
+    }
   }
 
   return {

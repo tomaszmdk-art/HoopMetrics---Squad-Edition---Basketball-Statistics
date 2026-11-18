@@ -27,6 +27,7 @@ import {
   Download,
   Mail,
   Layers,
+  Upload,
 } from 'lucide-react';
 import { playClickSound, triggerHaptic } from '../services/tts';
 import { useLanguage } from '../i18n/LanguageContext';
@@ -34,6 +35,7 @@ import { BoxScoreTable } from './BoxScoreTable';
 import { PlayByPlayModal } from './PlayByPlayModal';
 import { ResumeMatchConfirmModal } from './ResumeMatchConfirmModal';
 import { exportMatchPdf } from '../services/exportPdf';
+import { getPlayerFullName, hasAnyPersonalData, resolveEventPlayerLabel } from '../services/playerDisplay';
 
 interface HomePageProps {
   activeCategory?: TeamCategory;
@@ -55,6 +57,7 @@ interface HomePageProps {
   onOpenShareModal?: () => void;
   onOpenTransferModal?: () => void;
   onOpenTeamExport?: () => void;
+  onOpenTeamImport?: () => void;
 }
 
 export const HomePage: React.FC<HomePageProps> = ({
@@ -74,12 +77,16 @@ export const HomePage: React.FC<HomePageProps> = ({
   onOpenShareModal,
   onOpenTransferModal,
   onOpenTeamExport,
+  onOpenTeamImport,
 }) => {
   const { t } = useLanguage();
   const [viewingMatch, setViewingMatch] = useState<Match | null>(null);
   const [viewingPlayByPlay, setViewingPlayByPlay] = useState<Match | null>(null);
   const [matchToResumeConfirm, setMatchToResumeConfirm] = useState<Match | null>(null);
   const [selectedSeason, setSelectedSeason] = useState<string>('all');
+  const [includePersonalData, setIncludePersonalData] = useState<boolean>(false);
+
+  const hasPii = useMemo(() => hasAnyPersonalData(players), [players]);
 
   const clubName = clubProfile?.name || 'Moja Drużyna Koszykarska';
   const city = clubProfile?.city || 'Polska';
@@ -167,20 +174,25 @@ export const HomePage: React.FC<HomePageProps> = ({
               </div>
 
               {/* Last action ticker */}
-              {activeMatch.events.length > 0 && (
-                <div className="text-xs text-slate-400 flex items-center gap-2 pt-1 font-mono">
-                  <span className="text-amber-400 font-bold">Ostatnia akcja:</span>
-                  <span className="text-slate-200 truncate max-w-md">
-                    {activeMatch.events[activeMatch.events.length - 1].playerName
-                      ? `#${activeMatch.events[activeMatch.events.length - 1].playerNumber} ${activeMatch.events[activeMatch.events.length - 1].playerName}`
-                      : activeMatch.events[activeMatch.events.length - 1].team === 'our'
-                      ? clubProfile?.shortName
-                      : activeMatch.opponent}
-                    {' • '}
-                    {activeMatch.events[activeMatch.events.length - 1].subType || activeMatch.events[activeMatch.events.length - 1].type}
-                  </span>
-                </div>
-              )}
+              {activeMatch.events.length > 0 && (() => {
+                const lastEvt = activeMatch.events[activeMatch.events.length - 1];
+                const actorLabel =
+                  lastEvt.team === 'our'
+                    ? lastEvt.playerId || lastEvt.playerNumber !== undefined
+                      ? resolveEventPlayerLabel(lastEvt, players, true)
+                      : clubProfile?.shortName || clubName
+                    : activeMatch.opponent;
+                return (
+                  <div className="text-xs text-slate-400 flex items-center gap-2 pt-1 font-mono">
+                    <span className="text-amber-400 font-bold">Ostatnia akcja:</span>
+                    <span className="text-slate-200 truncate max-w-md">
+                      {actorLabel}
+                      {' • '}
+                      {lastEvt.subType || lastEvt.type}
+                    </span>
+                  </div>
+                );
+              })()}
             </div>
 
             <div className="shrink-0 flex items-center">
@@ -315,6 +327,18 @@ export const HomePage: React.FC<HomePageProps> = ({
               >
                 <Share2 className="w-3.5 h-3.5 text-amber-400" />
                 <span>Udostępnij link kibicom</span>
+              </button>
+            )}
+
+            {readOnly && onOpenTeamImport && (
+              <button
+                type="button"
+                onClick={onOpenTeamImport}
+                className="py-2.5 px-4 rounded-xl bg-emerald-500/15 hover:bg-emerald-500/25 text-emerald-300 border border-emerald-500/40 font-bold text-xs transition flex items-center justify-center gap-2 active:scale-95"
+                title="Wczytaj plik JSON ze składem i zdjęciami od trenera (zapis lokalny)"
+              >
+                <Upload className="w-3.5 h-3.5 text-emerald-400" />
+                <span>Importuj skład (lokalnie)</span>
               </button>
             )}
 
@@ -713,7 +737,7 @@ export const HomePage: React.FC<HomePageProps> = ({
                         {player.number}
                       </span>
                       <span className="font-bold text-slate-200">
-                        {player.firstName} {player.lastName}
+                        {getPlayerFullName(player)}
                       </span>
                     </div>
                     <span className="text-[10px] px-1.5 py-0.5 rounded bg-slate-800 text-slate-400 font-semibold uppercase">
@@ -761,6 +785,17 @@ export const HomePage: React.FC<HomePageProps> = ({
                     <span>Edytuj mecz</span>
                   </button>
                 )}
+                {hasPii && (
+                  <label className="flex items-center gap-1.5 cursor-pointer select-none text-[11px] text-slate-300 px-2 py-1 rounded-lg bg-slate-900 border border-slate-800">
+                    <input
+                      type="checkbox"
+                      checked={includePersonalData}
+                      onChange={(e) => setIncludePersonalData(e.target.checked)}
+                      className="w-3.5 h-3.5 accent-amber-500 rounded cursor-pointer"
+                    />
+                    <span>Dane osobowe w PDF</span>
+                  </label>
+                )}
                 <button
                   onClick={() => {
                     const roster =
@@ -771,6 +806,7 @@ export const HomePage: React.FC<HomePageProps> = ({
                       includeBoxScore: true,
                       includePlayByPlay: true,
                       includePlayerPages: true,
+                      includePersonalData,
                     });
                   }}
                   className="px-2.5 py-1 rounded-lg bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 border border-amber-500/40 text-xs font-bold transition flex items-center gap-1"
@@ -815,6 +851,7 @@ export const HomePage: React.FC<HomePageProps> = ({
           isOpen={true}
           onClose={() => setViewingPlayByPlay(null)}
           match={viewingPlayByPlay}
+          rosterPlayers={players}
           onDeleteEvent={readOnly ? undefined : () => {}}
         />
       )}

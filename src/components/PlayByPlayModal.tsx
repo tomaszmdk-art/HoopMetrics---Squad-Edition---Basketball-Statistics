@@ -1,14 +1,22 @@
 import React, { useState } from 'react';
-import { Match, MatchEvent } from '../types/basketball';
+import { Match, MatchEvent, Player } from '../types/basketball';
 import { X, Trash2, Download, AlertCircle, Clock, FileText, Loader2 } from 'lucide-react';
 import { exportPlayByPlayCsv } from '../services/exportCsv';
 import { exportPlayByPlayPdf } from '../services/exportPdf';
 import { playClickSound, triggerHaptic } from '../services/tts';
+import {
+  findPlayerForEvent,
+  getPlayerFullName,
+  hasAnyPersonalData,
+  resolveEventAssistLabel,
+  resolveEventPlayerLabel,
+} from '../services/playerDisplay';
 
 interface PlayByPlayModalProps {
   isOpen: boolean;
   onClose: () => void;
   match: Match;
+  rosterPlayers?: Player[];
   onDeleteEvent?: (eventId: string) => void;
 }
 
@@ -41,33 +49,41 @@ export const PlayByPlayModal: React.FC<PlayByPlayModalProps> = ({
   isOpen,
   onClose,
   match,
+  rosterPlayers = [],
   onDeleteEvent,
 }) => {
   const [isExportingPdf, setIsExportingPdf] = useState(false);
+  const [includePersonalData, setIncludePersonalData] = useState(false);
   const [selectedPlayerId, setSelectedPlayerId] = useState<string>('all');
   const [selectedQuarter, setSelectedQuarter] = useState<number | 'all'>('all');
+  const hasPii = hasAnyPersonalData(rosterPlayers);
 
   // Extract all unique players who have recorded events
   const playersWithEvents = React.useMemo(() => {
     if (!match?.events) return [];
     const map = new Map<string, { id: string; name: string; number?: number; count: number }>();
     match.events.forEach((e) => {
-      if (e.playerId && e.playerName) {
-        const existing = map.get(e.playerId);
+      if (e.team === 'our' && (e.playerId || e.playerNumber !== undefined)) {
+        const key = e.playerId || `num-${e.playerNumber}`;
+        const existing = map.get(key);
         if (existing) {
           existing.count += 1;
         } else {
-          map.set(e.playerId, {
-            id: e.playerId,
-            name: e.playerName,
-            number: e.playerNumber,
+          const matched = findPlayerForEvent(e, rosterPlayers);
+          const displayName = matched
+            ? getPlayerFullName(matched)
+            : e.playerName?.trim() || (e.playerNumber !== undefined ? `Zawodnik #${e.playerNumber}` : 'Zawodnik');
+          map.set(key, {
+            id: key,
+            name: displayName,
+            number: matched?.number ?? e.playerNumber,
             count: 1,
           });
         }
       }
     });
     return Array.from(map.values()).sort((a, b) => (a.number ?? 99) - (b.number ?? 99));
-  }, [match?.events]);
+  }, [match?.events, rosterPlayers]);
 
   const filteredEvents = React.useMemo(() => {
     if (!match?.events) return [];
@@ -75,7 +91,14 @@ export const PlayByPlayModal: React.FC<PlayByPlayModalProps> = ({
       .reverse()
       .filter((e) => {
         if (selectedQuarter !== 'all' && e.quarter !== selectedQuarter) return false;
-        if (selectedPlayerId !== 'all' && e.playerId !== selectedPlayerId) return false;
+        if (selectedPlayerId !== 'all') {
+          if (selectedPlayerId.startsWith('num-')) {
+            const num = Number(selectedPlayerId.slice(4));
+            if (e.playerNumber !== num || e.team !== 'our') return false;
+          } else if (e.playerId !== selectedPlayerId) {
+            return false;
+          }
+        }
         return true;
       });
   }, [match?.events, selectedQuarter, selectedPlayerId]);
@@ -94,7 +117,7 @@ export const PlayByPlayModal: React.FC<PlayByPlayModalProps> = ({
     playClickSound();
     triggerHaptic(30);
     try {
-      await exportPlayByPlayPdf(match);
+      await exportPlayByPlayPdf(match, rosterPlayers, { includePersonalData });
     } catch (err) {
       console.error('Błąd eksportu Play-by-Play PDF:', err);
     } finally {
@@ -136,7 +159,7 @@ export const PlayByPlayModal: React.FC<PlayByPlayModalProps> = ({
               <span>PDF</span>
             </button>
             <button
-              onClick={() => exportPlayByPlayCsv(match)}
+              onClick={() => exportPlayByPlayCsv(match, rosterPlayers, includePersonalData)}
               className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold border border-slate-700 transition"
               title="Eksportuj protokół do CSV"
             >
@@ -152,6 +175,23 @@ export const PlayByPlayModal: React.FC<PlayByPlayModalProps> = ({
           </div>
         </div>
 
+        {hasPii && (
+          <div className="px-4 py-2 bg-slate-950/90 border-b border-slate-800/80 flex items-center justify-end">
+            <label
+              className="flex items-center gap-2 text-[11px] font-semibold text-slate-300 cursor-pointer select-none hover:text-amber-300 transition"
+              title="Domyślnie protokół PDF i CSV zawiera wyłącznie numery zawodników"
+            >
+              <input
+                type="checkbox"
+                checked={includePersonalData}
+                onChange={(e) => setIncludePersonalData(e.target.checked)}
+                className="w-3.5 h-3.5 rounded accent-amber-500 cursor-pointer"
+              />
+              <span>Dołącz dane osobowe do PDF/CSV (imiona i nazwiska)</span>
+            </label>
+          </div>
+        )}
+
         {/* Filters Bar: Select Player and Quarter */}
         <div className="p-3 bg-slate-950/80 border-b border-slate-800/80 flex items-center justify-between gap-2.5 flex-wrap">
           {/* Player Selector */}
@@ -164,7 +204,10 @@ export const PlayByPlayModal: React.FC<PlayByPlayModalProps> = ({
               <option value="all">Wszyscy zawodnicy ({match.events.length} akcji)</option>
               {playersWithEvents.map((p) => (
                 <option key={p.id} value={p.id}>
-                  #{p.number} {p.name} (pełna lista: {p.count} akcji)
+                  {p.number !== undefined && !p.name.startsWith('Zawodnik #')
+                    ? `#${p.number} ${p.name}`
+                    : p.name}{' '}
+                  (pełna lista: {p.count} akcji)
                 </option>
               ))}
             </select>
@@ -234,9 +277,9 @@ export const PlayByPlayModal: React.FC<PlayByPlayModalProps> = ({
                     {/* Action & Player info */}
                     <div className="min-w-0">
                       <div className="flex items-center gap-2 flex-wrap">
-                        {e.playerNumber !== undefined ? (
+                        {e.playerId || e.playerNumber !== undefined ? (
                           <span className="font-mono font-bold text-amber-400 text-xs">
-                            #{e.playerNumber} {e.playerName}
+                            {resolveEventPlayerLabel(e, rosterPlayers, true)}
                           </span>
                         ) : (
                           <span className="text-xs font-semibold text-slate-400">
@@ -258,11 +301,15 @@ export const PlayByPlayModal: React.FC<PlayByPlayModalProps> = ({
                         )}
                       </div>
 
-                      {e.assistedByPlayerName && (
-                        <div className="text-[10px] text-sky-400 font-medium mt-0.5">
-                          ↳ Asysta: {e.assistedByPlayerName}
-                        </div>
-                      )}
+                      {(() => {
+                        const assistLabel = resolveEventAssistLabel(e, rosterPlayers, true);
+                        if (!assistLabel) return null;
+                        return (
+                          <div className="text-[10px] text-sky-400 font-medium mt-0.5">
+                            ↳ Asysta: {assistLabel}
+                          </div>
+                        );
+                      })()}
                     </div>
                   </div>
 

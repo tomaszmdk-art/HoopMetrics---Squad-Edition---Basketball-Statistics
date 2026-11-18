@@ -8,6 +8,7 @@ import {
 import { playClickSound, playScoreSound, triggerHaptic } from '../services/tts';
 import { useLanguage } from '../i18n/LanguageContext';
 import { LiveMatchTheme, ActionTileKey, TileFontFamily } from '../types/liveMatchTheme';
+import { getPlayerShortName } from '../services/playerDisplay';
 
 interface ActionKeypadProps {
   layoutMode?: 'mobile' | 'tablet';
@@ -404,7 +405,11 @@ export const ActionKeypad: React.FC<ActionKeypadProps> = ({
                     }`}
                     title={
                       player
-                        ? `Zawodnik #${player.number} ${player.lastName}${isSelected ? ' (WYBRANY)' : ''}`
+                        ? `Zawodnik #${player.number}${
+                            player.lastName?.trim() || player.firstName?.trim()
+                              ? ` ${getPlayerShortName(player)}`
+                              : ''
+                          }${isSelected ? ' (WYBRANY)' : ''}`
                         : 'Pusty slot na parkiecie'
                     }
                   >
@@ -419,7 +424,7 @@ export const ActionKeypad: React.FC<ActionKeypadProps> = ({
                           #{player.number}
                         </span>
                         <span className="text-[10px] xs:text-[11px] font-black uppercase tracking-tight truncate max-w-full px-1 text-slate-950 leading-tight mt-0.5">
-                          {player.lastName}
+                          {player.lastName?.trim() || player.firstName?.trim() || player.position || 'Zawodnik'}
                         </span>
                       </>
                     ) : (
@@ -725,7 +730,10 @@ export const ActionKeypad: React.FC<ActionKeypadProps> = ({
                 </h3>
                 {selectedPlayer && (
                   <p className="text-xs text-slate-400 font-mono">
-                    #{selectedPlayer.number} {selectedPlayer.lastName}
+                    #{selectedPlayer.number}
+                    {selectedPlayer.lastName?.trim() || selectedPlayer.firstName?.trim()
+                      ? ` ${getPlayerShortName(selectedPlayer)}`
+                      : ''}
                   </p>
                 )}
               </div>

@@ -1,6 +1,11 @@
 import React, { useEffect, useRef } from 'react';
 import { ClubProfile, Match, MatchEvent, Player } from '../types/basketball';
 import { X, Clock } from 'lucide-react';
+import {
+  findPlayerForEvent,
+  getPlayerFullName,
+  resolveEventAssistLabel,
+} from '../services/playerDisplay';
 
 interface LiveSpectatorActionPopupProps {
   event: MatchEvent | null;
@@ -236,7 +241,15 @@ export const LiveSpectatorActionPopup: React.FC<LiveSpectatorActionPopupProps> =
   };
 
   const isOurTeam = event.team === 'our';
-  const matchedPlayer = event.playerId ? players.find((p) => p.id === event.playerId) : undefined;
+  const matchedPlayer = findPlayerForEvent(event, players);
+  const hasActor = Boolean(event.playerId || event.playerNumber !== undefined);
+  const matchedFullName = matchedPlayer
+    ? `${matchedPlayer.firstName || ''} ${matchedPlayer.lastName || ''}`.trim()
+    : '';
+  const actorName = matchedFullName || event.playerName?.trim() || '';
+  const actorNumber = event.playerNumber ?? matchedPlayer?.number;
+  const actorAlt = matchedPlayer ? getPlayerFullName(matchedPlayer) : (actorName || 'Zawodnik');
+  const assistLabel = resolveEventAssistLabel(event, players, true);
   const quarterLabel = event.quarter > 4 ? 'Dogrywka (OT)' : `Kwarta ${event.quarter}`;
 
   return (
@@ -287,13 +300,13 @@ export const LiveSpectatorActionPopup: React.FC<LiveSpectatorActionPopupProps> =
           {matchedPlayer?.photo ? (
             <img
               src={matchedPlayer.photo}
-              alt={event.playerName || 'Zawodnik'}
+              alt={actorAlt}
               className="w-14 h-14 sm:w-16 sm:h-16 rounded-2xl object-cover border-2 border-amber-400/80 shrink-0 shadow-md"
             />
           ) : (
             <div className="w-14 h-14 sm:w-16 sm:h-16 rounded-2xl bg-gradient-to-br from-slate-800 to-slate-950 border-2 border-amber-500/70 flex flex-col items-center justify-center shrink-0 shadow-md">
               <span className="font-mono font-black text-xl sm:text-2xl text-amber-400 leading-none">
-                {event.playerNumber !== undefined ? `#${event.playerNumber}` : meta.icon}
+                {actorNumber !== undefined ? `#${actorNumber}` : meta.icon}
               </span>
               <span className="text-[9px] font-bold text-slate-400 uppercase tracking-tighter mt-0.5">
                 {isOurTeam ? 'UKS' : 'RYWAL'}
@@ -307,12 +320,12 @@ export const LiveSpectatorActionPopup: React.FC<LiveSpectatorActionPopupProps> =
               {isOurTeam ? clubName : oppName}
             </div>
             <div className="text-lg sm:text-2xl font-black text-white truncate tracking-tight">
-              {event.playerName ? (
+              {hasActor ? (
                 <>
-                  {event.playerNumber !== undefined && (
-                    <span className="text-amber-400 font-mono mr-1.5">#{event.playerNumber}</span>
+                  {actorNumber !== undefined && (
+                    <span className="text-amber-400 font-mono mr-1.5">#{actorNumber}</span>
                   )}
-                  {event.playerName}
+                  {actorName || 'Zawodnik'}
                 </>
               ) : (
                 <span>{isOurTeam ? clubName : oppName}</span>
@@ -356,10 +369,10 @@ export const LiveSpectatorActionPopup: React.FC<LiveSpectatorActionPopupProps> =
             )}
 
             {/* Assist details */}
-            {event.assistedByPlayerName && (
+            {assistLabel && (
               <div className="flex items-center gap-2 text-xs font-semibold text-sky-300 bg-sky-500/10 px-2.5 py-1 rounded-xl border border-sky-500/30">
                 <span className="text-sky-400">↳ Asysta przy koszu:</span>
-                <strong className="text-sky-200">{event.assistedByPlayerName}</strong>
+                <strong className="text-sky-200">{assistLabel}</strong>
               </div>
             )}
           </div>

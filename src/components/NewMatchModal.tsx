@@ -326,7 +326,7 @@ export const NewMatchModal: React.FC<NewMatchModalProps> = ({
                         #{player.number}
                       </span>
                       <span className="text-xs font-semibold truncate">
-                        {player.lastName}
+                        {player.lastName?.trim() || player.firstName?.trim() || 'Zawodnik'}
                       </span>
                     </button>
 

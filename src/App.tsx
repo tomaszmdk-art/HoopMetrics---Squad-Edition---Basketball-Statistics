@@ -56,6 +56,10 @@ import {
   WsConnectionStatus,
 } from './services/syncService';
 import {
+  mergeServerClubWithLocal,
+  mergeServerPlayersWithLocal,
+} from './services/playerDisplay';
+import {
   Trophy,
   Users,
   PlusCircle,
@@ -119,6 +123,7 @@ export default function App() {
   });
 
   const [players, setPlayers] = useState<Player[]>([]);
+  const playersRef = useRef<Player[]>([]);
   const [matches, setMatches] = useState<Match[]>([]);
   const [activeMatch, setActiveMatch] = useState<Match | undefined>(undefined);
   const activeMatchRef = useRef<Match | undefined>(undefined);
@@ -131,6 +136,7 @@ export default function App() {
   const [isLiveCustomizerOpen, setIsLiveCustomizerOpen] = useState(false);
 
   const [clubProfile, setClubProfile] = useState<ClubProfile>(DEFAULT_CLUB_PROFILE);
+  const clubProfileRef = useRef<ClubProfile>(DEFAULT_CLUB_PROFILE);
   const [isClubProfileOpen, setIsClubProfileOpen] = useState(false);
   const [isLegalModalOpen, setIsLegalModalOpen] = useState(false);
   const [isFinishModalOpen, setIsFinishModalOpen] = useState(false);
@@ -176,6 +182,14 @@ export default function App() {
   useEffect(() => {
     activeMatchRef.current = activeMatch;
   }, [activeMatch]);
+
+  useEffect(() => {
+    playersRef.current = players;
+  }, [players]);
+
+  useEffect(() => {
+    clubProfileRef.current = clubProfile;
+  }, [clubProfile]);
 
   const handleOpenTeamExportImport = (tab: 'export' | 'import' = 'export') => {
     setTeamExportImportTab(tab);
@@ -253,8 +267,10 @@ export default function App() {
     setActiveMatch(undefined);
     activeMatchRef.current = undefined;
     setPlayers([]);
+    playersRef.current = [];
     setMatches([]);
     setClubProfile(DEFAULT_CLUB_PROFILE);
+    clubProfileRef.current = DEFAULT_CLUB_PROFILE;
     setJustCreatedRoom(false);
     setIsShareModalOpen(false);
     setLobbyParentMode(false);
@@ -305,25 +321,29 @@ export default function App() {
         }
       }
 
-      // 1. Club profile
+      // 1. Club profile (preserve local coach names if stored)
       if (serverData.clubProfile) {
-        const clubJson = JSON.stringify(serverData.clubProfile);
+        const mergedClub = mergeServerClubWithLocal(serverData.clubProfile, clubProfileRef.current);
+        const clubJson = JSON.stringify(mergedClub);
         if (clubJson !== syncFingerprintsRef.current.club) {
           syncFingerprintsRef.current.club = clubJson;
-          setClubProfile(serverData.clubProfile);
-          saveClubProfile(serverData.clubProfile).catch(() => {});
+          clubProfileRef.current = mergedClub;
+          setClubProfile(mergedClub);
+          saveClubProfile(mergedClub).catch(() => {});
         }
       }
 
-      // 2. Players
+      // 2. Players (merge server jersey numbers with local names & photos)
       if (Array.isArray(serverData.players)) {
-        const playersFp = `${serverData.players.length}:${serverData.players
+        const mergedPlayers = mergeServerPlayersWithLocal(serverData.players, playersRef.current);
+        const playersFp = `${mergedPlayers.length}:${mergedPlayers
           .map((p) => `${p.id}-${p.number}-${p.firstName}-${p.lastName}-${p.photo ? '1' : '0'}`)
           .join(',')}`;
         if (playersFp !== syncFingerprintsRef.current.players) {
           syncFingerprintsRef.current.players = playersFp;
-          setPlayers(serverData.players);
-          replacePlayersInRoom(serverData.players).catch(() => {});
+          playersRef.current = mergedPlayers;
+          setPlayers(mergedPlayers);
+          replacePlayersInRoom(mergedPlayers).catch(() => {});
         }
       }
 
@@ -515,9 +535,9 @@ export default function App() {
 
         if (serverData) {
           if (serverData.clubProfile) {
-            // Prefer server profile for spectators, or when server has newer update
+            // Prefer server profile for spectators, or when server has newer update; preserve local coach names
             if (!isCoachActive || (serverData.clubProfile.updatedAt || 0) >= (loadedClub.updatedAt || 0)) {
-              finalClub = serverData.clubProfile;
+              finalClub = mergeServerClubWithLocal(serverData.clubProfile, loadedClub);
               await saveClubProfile(finalClub).catch(() => {});
             }
           }
@@ -557,13 +577,14 @@ export default function App() {
           }
 
           if (Array.isArray(serverData.players)) {
-            if (!isCoachActive || loadedPlayers.length === 0 || serverData.players.length > 0) {
-              if (!isCoachActive || loadedPlayers.length === 0) {
-                finalPlayers = serverData.players;
-                if (finalPlayers.length > 0) {
-                  await replacePlayersInRoom(finalPlayers).catch(() => {});
-                }
+            if (!isCoachActive) {
+              finalPlayers = mergeServerPlayersWithLocal(serverData.players, loadedPlayers);
+              if (finalPlayers.length > 0) {
+                await replacePlayersInRoom(finalPlayers).catch(() => {});
               }
+            } else if (loadedPlayers.length === 0 && serverData.players.length > 0) {
+              finalPlayers = mergeServerPlayersWithLocal(serverData.players, loadedPlayers);
+              await replacePlayersInRoom(finalPlayers).catch(() => {});
             }
           }
         }
@@ -625,6 +646,8 @@ export default function App() {
           saveSettings(mergedSettings).catch(() => {});
         }
 
+        clubProfileRef.current = finalClub;
+        playersRef.current = finalPlayers;
         setClubProfile(finalClub);
         setPlayers(finalPlayers);
         setMatches(finalMatches);
@@ -925,9 +948,15 @@ export default function App() {
     updatedClub?: ClubProfile
   ) => {
     lastLocalWriteAtRef.current = Date.now();
+    playersRef.current = updatedPlayers;
+    syncFingerprintsRef.current.players = `${updatedPlayers.length}:${updatedPlayers
+      .map((p) => `${p.id}-${p.number}-${p.firstName}-${p.lastName}-${p.photo ? '1' : '0'}`)
+      .join(',')}`;
     setMatches(updatedMatches);
     setPlayers(updatedPlayers);
     if (updatedClub) {
+      clubProfileRef.current = updatedClub;
+      syncFingerprintsRef.current.club = JSON.stringify(updatedClub);
       setClubProfile(updatedClub);
     }
     const live = updatedMatches.find((m) => m.status === 'live');
@@ -952,6 +981,7 @@ export default function App() {
       }
       return [...players, normalized];
     })().sort((a, b) => a.number - b.number);
+    playersRef.current = nextPlayers;
     setPlayers(nextPlayers);
 
     if (roomId && coachToken) {
@@ -970,6 +1000,7 @@ export default function App() {
     lastLocalWriteAtRef.current = Date.now();
     await deletePlayer(id);
     const nextPlayers = players.filter((p) => p.id !== id);
+    playersRef.current = nextPlayers;
     setPlayers(nextPlayers);
 
     if (roomId && coachToken) {
@@ -1007,6 +1038,7 @@ export default function App() {
   const handleSaveClubProfile = async (newProfile: ClubProfile) => {
     if (isReadOnlyViewer || !roomId) return;
     lastLocalWriteAtRef.current = Date.now();
+    clubProfileRef.current = newProfile;
     setClubProfile(newProfile);
     await saveClubProfile(newProfile);
     pushRoomStateImmediate(roomId, coachToken, {
@@ -1048,6 +1080,7 @@ export default function App() {
     if (isReadOnlyViewer || !roomId) return;
     lastLocalWriteAtRef.current = Date.now();
     const updated = await getPlayers();
+    playersRef.current = updated;
     setPlayers(updated);
     pushRoomStateImmediate(roomId, coachToken, {
       matches,
@@ -1155,7 +1188,7 @@ export default function App() {
         onOpenCoachLogin={() => setIsCoachPinOpen(true)}
         onSwitchToSpectator={handleLockOrSwitchToSpectator}
         onOpenTransferModal={() => setIsTransferModalOpen(true)}
-        onOpenTeamExportImport={!isReadOnlyViewer ? handleOpenTeamExportImport : undefined}
+        onOpenTeamExportImport={handleOpenTeamExportImport}
       />
 
       {!isReadOnlyViewer && serverPersistence === 'ephemeral-tmp' && !dismissedPersistenceBanner && (
@@ -1204,6 +1237,7 @@ export default function App() {
             }}
             onOpenTransferModal={() => setIsTransferModalOpen(true)}
             onOpenTeamExport={!isReadOnlyViewer ? () => handleOpenTeamExportImport('export') : undefined}
+            onOpenTeamImport={isReadOnlyViewer ? () => handleOpenTeamExportImport('import') : undefined}
           />
         )}
 
@@ -1432,7 +1466,7 @@ export default function App() {
               matches={matches}
               readOnly={isReadOnlyViewer}
               onOpenTeamExport={!isReadOnlyViewer ? () => handleOpenTeamExportImport('export') : undefined}
-              onOpenTeamImport={!isReadOnlyViewer ? () => handleOpenTeamExportImport('import') : undefined}
+              onOpenTeamImport={() => handleOpenTeamExportImport('import')}
             />
           </div>
         )}
@@ -1542,6 +1576,7 @@ export default function App() {
         matches={matches}
         onDataImported={handleDataImported}
         defaultTab={teamExportImportTab}
+        readOnly={isReadOnlyViewer}
       />
 
       {/* Share Spectator & Coach Room Links Modal */}
