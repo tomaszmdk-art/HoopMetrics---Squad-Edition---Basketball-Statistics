@@ -326,17 +326,25 @@ export async function authenticateRoomCoach(
 
 export async function fetchRoomState(
   roomId: string,
-  coachToken?: string | null
+  coachToken?: string | null,
+  since?: number
 ): Promise<{ status: number; data: ServerSyncData | null }> {
   try {
     const headers: Record<string, string> = {};
     if (coachToken) {
       headers['x-coach-token'] = coachToken;
     }
-    const res = await fetch(`/api/rooms/${encodeURIComponent(roomId)}/state`, {
+    const query =
+      typeof since === 'number' && Number.isFinite(since) && since > 0 && !coachToken
+        ? `?since=${Math.floor(since)}`
+        : '';
+    const res = await fetch(`/api/rooms/${encodeURIComponent(roomId)}/state${query}`, {
       cache: 'no-store',
       headers,
     });
+    if (res.status === 304) {
+      return { status: 304, data: null };
+    }
     if (!res.ok) {
       return { status: res.status, data: null };
     }

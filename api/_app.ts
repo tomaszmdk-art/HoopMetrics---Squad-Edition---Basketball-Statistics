@@ -491,6 +491,33 @@ export async function loadRoom(roomId: string): Promise<ServerRoomState | null> 
   }
 }
 
+export async function getRoomUpdatedAt(roomId: string): Promise<number | null> {
+  const cleanId = sanitizeRoomId(roomId);
+  if (!cleanId) return null;
+
+  // In PostgreSQL mode, read only the indexed 8-byte updated_at column without fetching the JSONB blob
+  const pool = await getPgPool();
+  if (pool) {
+    try {
+      const result = await pool.query(
+        'SELECT updated_at FROM basketstats_rooms WHERE room_id = $1 LIMIT 1',
+        [cleanId]
+      );
+      if (result.rows && result.rows.length > 0) {
+        const ts = Number(result.rows[0].updated_at);
+        if (Number.isFinite(ts) && ts > 0) {
+          return ts;
+        }
+      }
+    } catch (err) {
+      console.error(`Failed to check updated_at for room ${cleanId} from PostgreSQL:`, err);
+    }
+  }
+
+  const room = await loadRoom(cleanId);
+  return room ? room.lastUpdated || 0 : null;
+}
+
 export function buildPublicRoomState(room: ServerRoomState, isCoachAuthenticated: boolean) {
   return {
     roomId: room.roomId,
@@ -755,11 +782,34 @@ export function createApiApp(options: CreateApiAppOptions = {}): Express {
   });
 
   // Fetch isolated room state (safe for parents/spectators; hides PIN/token unless coach authenticated)
+  // Supports ?since=<timestamp> for conditional 304 Not Modified responses without reading full JSONB payloads
   app.get('/api/rooms/:roomId/state', async (req: Request, res: Response) => {
     const roomId = sanitizeRoomId(req.params.roomId);
     if (!roomId) {
       res.status(400).json({ error: 'Nieprawidłowy kod pokoju' });
       return;
+    }
+
+    res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+
+    const rawSince = typeof req.query.since === 'string' ? Number(req.query.since) : NaN;
+    const since = Number.isFinite(rawSince) && rawSince > 0 ? Math.floor(rawSince) : 0;
+    const hasCoachHeaders = Boolean(
+      (req.headers['x-coach-token'] as string | undefined)?.trim() ||
+      (req.query.coachToken as string | undefined)?.trim() ||
+      (req.headers['x-coach-pin'] as string | undefined)?.trim()
+    );
+
+    if (since > 0 && !hasCoachHeaders) {
+      const updatedAt = await getRoomUpdatedAt(roomId);
+      if (updatedAt === null) {
+        res.status(404).json({ error: 'Pokój drużyny nie został znaleziony' });
+        return;
+      }
+      if (updatedAt <= since) {
+        res.status(304).end();
+        return;
+      }
     }
 
     const room = await loadRoom(roomId);
@@ -768,8 +818,12 @@ export function createApiApp(options: CreateApiAppOptions = {}): Express {
       return;
     }
 
+    if (since > 0 && !hasCoachHeaders && (room.lastUpdated || 0) <= since) {
+      res.status(304).end();
+      return;
+    }
+
     const isCoach = isCoachRequestAuthorized(room, req);
-    res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
     res.json(buildPublicRoomState(room, isCoach));
   });
 
@@ -884,7 +938,7 @@ export function createApiApp(options: CreateApiAppOptions = {}): Express {
         room.coachPin = newCoachPin.trim().slice(0, 16);
       }
 
-      room.lastUpdated = Date.now();
+      room.lastUpdated = Math.max(Date.now(), (room.lastUpdated || 0) + 1);
       await saveRoom(room);
 
       const publicState = buildPublicRoomState(room, false);

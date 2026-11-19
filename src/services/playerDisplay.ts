@@ -186,3 +186,105 @@ export const mergeServerClubWithLocal = (
       : (localClub.assistantCoach || ''),
   };
 };
+
+export const createSubstitutionEvent = (
+  currentMatch: Match,
+  params: {
+    type: 'SUBSTITUTION' | 'SUB_IN' | 'SUB_OUT';
+    inPlayer?: Player;
+    outPlayer?: Player;
+    nextOnCourt: string[];
+    eventId?: string;
+  }
+): MatchEvent => {
+  const clockMin = Math.floor(currentMatch.clockSeconds / 60);
+  const clockSec = currentMatch.clockSeconds % 60;
+  const formattedClock = `${String(clockMin).padStart(2, '0')}:${String(clockSec).padStart(2, '0')}`;
+
+  if (params.type === 'SUBSTITUTION') {
+    return {
+      id: params.eventId || `evt-sub-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+      matchId: currentMatch.id,
+      timestamp: Date.now(),
+      quarter: currentMatch.currentQuarter,
+      gameClock: formattedClock,
+      clockSeconds: currentMatch.clockSeconds,
+      type: 'SUBSTITUTION',
+      team: 'our',
+      points: 0,
+      playerId: params.inPlayer?.id,
+      playerNumber: params.inPlayer?.number,
+      subOutPlayerId: params.outPlayer?.id,
+      subOutPlayerNumber: params.outPlayer?.number,
+      onCourtPlayerIds: [...params.nextOnCourt],
+      ourScoreAfter: currentMatch.ourScore,
+      oppScoreAfter: currentMatch.opponentScore,
+    };
+  }
+
+  const target = params.type === 'SUB_IN' ? params.inPlayer : params.outPlayer;
+  return {
+    id: params.eventId || `evt-sub-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+    matchId: currentMatch.id,
+    timestamp: Date.now(),
+    quarter: currentMatch.currentQuarter,
+    gameClock: formattedClock,
+    clockSeconds: currentMatch.clockSeconds,
+    type: params.type,
+    team: 'our',
+    points: 0,
+    playerId: target?.id,
+    playerNumber: target?.number,
+    onCourtPlayerIds: [...params.nextOnCourt],
+    ourScoreAfter: currentMatch.ourScore,
+    oppScoreAfter: currentMatch.opponentScore,
+  };
+};
+
+export const resolveSubstitutionLabels = (
+  event: MatchEvent,
+  players: Player[] = [],
+  includePersonalData: boolean = true
+): { inLabel?: string; outLabel?: string } => {
+  if (event.type === 'SUBSTITUTION') {
+    const inLabel =
+      event.playerId || event.playerNumber !== undefined
+        ? resolveEventPlayerLabel(event, players, includePersonalData)
+        : undefined;
+    const outLabel =
+      event.subOutPlayerId || event.subOutPlayerNumber !== undefined
+        ? resolveEventPlayerLabel(
+            {
+              ...event,
+              playerId: event.subOutPlayerId,
+              playerNumber: event.subOutPlayerNumber,
+              playerName: undefined,
+            },
+            players,
+            includePersonalData
+          )
+        : undefined;
+    return { inLabel, outLabel };
+  }
+
+  if (event.type === 'SUB_IN') {
+    return {
+      inLabel:
+        event.playerId || event.playerNumber !== undefined
+          ? resolveEventPlayerLabel(event, players, includePersonalData)
+          : undefined,
+    };
+  }
+
+  if (event.type === 'SUB_OUT') {
+    return {
+      outLabel:
+        event.playerId || event.playerNumber !== undefined
+          ? resolveEventPlayerLabel(event, players, includePersonalData)
+          : undefined,
+    };
+  }
+
+  return {};
+};
+

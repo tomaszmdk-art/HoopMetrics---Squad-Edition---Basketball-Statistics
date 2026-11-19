@@ -21,6 +21,7 @@ import {
   hasAnyPersonalData,
   resolveEventAssistLabel,
   resolveEventPlayerLabel,
+  resolveSubstitutionLabels,
 } from '../services/playerDisplay';
 
 interface LivePlayByPlayStreamProps {
@@ -37,7 +38,7 @@ const ACTION_DESCRIPTIONS: Record<
   {
     label: string;
     badge: string;
-    category: 'score' | 'rebound' | 'foul' | 'turnover' | 'defense' | 'assist';
+    category: 'score' | 'rebound' | 'foul' | 'turnover' | 'defense' | 'assist' | 'substitution';
   }
 > = {
   '2PT_MADE': {
@@ -150,6 +151,21 @@ const ACTION_DESCRIPTIONS: Record<
     badge: 'bg-slate-800 text-slate-400 border-slate-700',
     category: 'score',
   },
+  'SUBSTITUTION': {
+    label: 'Zmiana zawodnika',
+    badge: 'bg-orange-500/20 text-orange-300 border-orange-500/40',
+    category: 'substitution',
+  },
+  'SUB_IN': {
+    label: 'Wejście na parkiet',
+    badge: 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40',
+    category: 'substitution',
+  },
+  'SUB_OUT': {
+    label: 'Zejście na ławkę',
+    badge: 'bg-slate-800 text-slate-300 border-slate-700',
+    category: 'substitution',
+  },
 };
 
 export const LivePlayByPlayStream: React.FC<LivePlayByPlayStreamProps> = ({
@@ -181,21 +197,29 @@ export const LivePlayByPlayStream: React.FC<LivePlayByPlayStreamProps> = ({
   // Players present in events for optional player filter inside hamburger menu
   const playersWithEvents = useMemo(() => {
     const map = new Map<string, { id: string; label: string; number?: number; count: number }>();
+    const addPlayerRef = (pId?: string, pNum?: number) => {
+      if (!pId && pNum === undefined) return;
+      const key = pId || `num-${pNum}`;
+      const existing = map.get(key);
+      if (existing) {
+        existing.count += 1;
+      } else {
+        const matched = findPlayerForEvent({ playerId: pId, playerNumber: pNum }, rosterPlayers);
+        const fullName = matched ? getPlayerFullName(matched) : undefined;
+        const num = matched?.number ?? pNum;
+        const label =
+          fullName && !fullName.startsWith('Zawodnik #') && num !== undefined
+            ? `#${num} ${fullName}`
+            : fullName || (num !== undefined ? `Zawodnik #${num}` : 'Zawodnik');
+        map.set(key, { id: key, label, number: num, count: 1 });
+      }
+    };
+
     match.events.forEach((e) => {
-      if (e.team === 'our' && (e.playerId || e.playerNumber !== undefined)) {
-        const key = e.playerId || `num-${e.playerNumber}`;
-        const existing = map.get(key);
-        if (existing) {
-          existing.count += 1;
-        } else {
-          const matched = findPlayerForEvent(e, rosterPlayers);
-          const fullName = matched ? getPlayerFullName(matched) : undefined;
-          const num = matched?.number ?? e.playerNumber;
-          const label =
-            fullName && !fullName.startsWith('Zawodnik #') && num !== undefined
-              ? `#${num} ${fullName}`
-              : fullName || (num !== undefined ? `Zawodnik #${num}` : 'Zawodnik');
-          map.set(key, { id: key, label, number: num, count: 1 });
+      if (e.team === 'our') {
+        addPlayerRef(e.playerId, e.playerNumber);
+        if (e.subOutPlayerId || e.subOutPlayerNumber !== undefined) {
+          addPlayerRef(e.subOutPlayerId, e.subOutPlayerNumber);
         }
       }
     });
@@ -211,8 +235,16 @@ export const LivePlayByPlayStream: React.FC<LivePlayByPlayStreamProps> = ({
         if (selectedPlayerId !== 'all') {
           if (selectedPlayerId.startsWith('num-')) {
             const num = Number(selectedPlayerId.slice(4));
-            if (e.playerNumber !== num || e.team !== 'our') return false;
-          } else if (e.playerId !== selectedPlayerId) {
+            if (
+              e.team !== 'our' ||
+              (e.playerNumber !== num && e.subOutPlayerNumber !== num)
+            ) {
+              return false;
+            }
+          } else if (
+            e.playerId !== selectedPlayerId &&
+            e.subOutPlayerId !== selectedPlayerId
+          ) {
             return false;
           }
         }
@@ -395,6 +427,7 @@ export const LivePlayByPlayStream: React.FC<LivePlayByPlayStreamProps> = ({
                 { id: 'assist', label: 'Asysty' },
                 { id: 'rebound', label: 'Zbiórki' },
                 { id: 'defense', label: 'Obrona' },
+                { id: 'substitution', label: 'Zmiany' },
               ].map((cat) => (
                 <button
                   type="button"
@@ -470,10 +503,18 @@ export const LivePlayByPlayStream: React.FC<LivePlayByPlayStreamProps> = ({
                   e.team === 'our' &&
                   (e.playerId === highlightedPlayerId ||
                     e.assistedByPlayerId === highlightedPlayerId ||
+                    e.subOutPlayerId === highlightedPlayerId ||
                     (highlightedPlayerNumber !== undefined &&
                       !e.playerId &&
-                      e.playerNumber === highlightedPlayerNumber))
+                      e.playerNumber === highlightedPlayerNumber) ||
+                    (highlightedPlayerNumber !== undefined &&
+                      !e.subOutPlayerId &&
+                      e.subOutPlayerNumber === highlightedPlayerNumber))
               );
+              const subLabels =
+                e.type === 'SUBSTITUTION'
+                  ? resolveSubstitutionLabels(e, rosterPlayers, true)
+                  : null;
 
               return (
                 <div
@@ -508,7 +549,13 @@ export const LivePlayByPlayStream: React.FC<LivePlayByPlayStreamProps> = ({
                     {/* Action & Player Details */}
                     <div className="min-w-0 flex-1 space-y-1">
                       <div className="flex items-center gap-2 flex-wrap">
-                        {e.playerId || e.playerNumber !== undefined ? (
+                        {e.type === 'SUBSTITUTION' && subLabels ? (
+                          <span className="font-mono font-bold text-xs sm:text-sm flex items-center gap-1.5 flex-wrap">
+                            <span className="text-rose-300">{subLabels.outLabel || 'Zawodnik'}</span>
+                            <span className="text-slate-400">➔</span>
+                            <span className="text-emerald-300">{subLabels.inLabel || 'Zawodnik'}</span>
+                          </span>
+                        ) : e.playerId || e.playerNumber !== undefined ? (
                           <span className="font-mono font-black text-amber-400 text-xs sm:text-sm">
                             {resolveEventPlayerLabel(e, rosterPlayers, true)}
                           </span>

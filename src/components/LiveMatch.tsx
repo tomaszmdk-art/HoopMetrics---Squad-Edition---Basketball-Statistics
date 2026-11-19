@@ -384,11 +384,28 @@ export const LiveMatch: React.FC<LiveMatchProps> = ({
 
     onUpdateMatch((currentMatch) => {
       if (currentMatch.events.length === 0) return currentMatch;
+      const removedEvent = currentMatch.events[currentMatch.events.length - 1];
       const newEvents = currentMatch.events.slice(0, -1);
       const recalculated = recalculateMatchScores(newEvents);
 
+      let nextOnCourt = currentMatch.onCourtPlayerIds;
+      if (removedEvent.type === 'SUBSTITUTION' && removedEvent.playerId && removedEvent.subOutPlayerId) {
+        if (nextOnCourt.includes(removedEvent.playerId)) {
+          nextOnCourt = nextOnCourt.map((id) =>
+            id === removedEvent.playerId ? removedEvent.subOutPlayerId! : id
+          );
+        }
+      } else if (removedEvent.type === 'SUB_IN' && removedEvent.playerId) {
+        nextOnCourt = nextOnCourt.filter((id) => id !== removedEvent.playerId);
+      } else if (removedEvent.type === 'SUB_OUT' && removedEvent.playerId) {
+        if (!nextOnCourt.includes(removedEvent.playerId) && nextOnCourt.length < 5) {
+          nextOnCourt = [...nextOnCourt, removedEvent.playerId];
+        }
+      }
+
       return {
         ...currentMatch,
+        onCourtPlayerIds: nextOnCourt,
         ourScore: recalculated.ourScore,
         opponentScore: recalculated.oppScore,
         quarterScores: recalculated.quarterScores,

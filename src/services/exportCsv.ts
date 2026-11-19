@@ -1,7 +1,7 @@
 import { Match, Player, PlayerCareerAverages, PlayerMatchStats, TeamMatchStats } from '../types/basketball';
 import { calculatePlayerStats, calculateTeamStats } from './statsCalculator';
 import { getClubProfileSync } from './db';
-import { resolveEventPlayerLabel } from './playerDisplay';
+import { resolveEventPlayerLabel, resolveSubstitutionLabels } from './playerDisplay';
 
 // Helper to trigger CSV download with UTF-8 BOM
 function downloadCsv(filename: string, content: string) {
@@ -159,9 +159,30 @@ export function exportPlayByPlayCsv(
     'MANUAL_OUR_PLUS_2': 'Ręczna korekta UKS (+2)',
     'MANUAL_OUR_PLUS_3': 'Ręczna korekta UKS (+3)',
     'MANUAL_OUR_MINUS_1': 'Ręczna korekta UKS (-1)',
+    'SUBSTITUTION': 'Zmiana zawodnika',
+    'SUB_IN': 'Wejście na parkiet',
+    'SUB_OUT': 'Zejście na ławkę',
   };
 
   match.events.forEach((e, idx) => {
+    if (e.type === 'SUBSTITUTION') {
+      const { inLabel, outLabel } = resolveSubstitutionLabels(e, rosterPlayers, includePersonalData);
+      lines.push(
+        [
+          idx + 1,
+          e.quarter > 4 ? 'Dogrywka (OT)' : `Kwarta ${e.quarter}`,
+          e.gameClock,
+          `"${outLabel || '-'} -> ${inLabel || '-'}"`,
+          e.playerNumber || '-',
+          `"${actionLabels[e.type]}"`,
+          `"Schodzi: ${outLabel || '-'} / Wchodzi: ${inLabel || '-'}"`,
+          e.ourScoreAfter,
+          e.oppScoreAfter,
+        ].join(';')
+      );
+      return;
+    }
+
     lines.push(
       [
         idx + 1,

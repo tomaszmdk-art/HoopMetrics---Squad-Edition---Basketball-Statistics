@@ -10,6 +10,7 @@ import {
   hasAnyPersonalData,
   resolveEventAssistLabel,
   resolveEventPlayerLabel,
+  resolveSubstitutionLabels,
 } from '../services/playerDisplay';
 
 interface PlayByPlayModalProps {
@@ -45,6 +46,9 @@ const ACTION_DESCRIPTIONS: Record<string, { label: string; badge: string }> = {
   'MANUAL_OUR_PLUS_2': { label: 'Ręczna korekta UKS (+2)', badge: 'bg-amber-500/20 text-amber-400 border-amber-500/40' },
   'MANUAL_OUR_PLUS_3': { label: 'Ręczna korekta UKS (+3)', badge: 'bg-amber-500/20 text-amber-400 border-amber-500/40' },
   'MANUAL_OUR_MINUS_1': { label: 'Ręczna korekta UKS (-1)', badge: 'bg-slate-800 text-slate-400 border-slate-700' },
+  'SUBSTITUTION': { label: 'Zmiana zawodnika', badge: 'bg-orange-500/20 text-orange-300 border-orange-500/40' },
+  'SUB_IN': { label: 'Wejście na parkiet', badge: 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40' },
+  'SUB_OUT': { label: 'Zejście na ławkę', badge: 'bg-slate-800 text-slate-300 border-slate-700' },
 };
 
 export const PlayByPlayModal: React.FC<PlayByPlayModalProps> = ({
@@ -75,23 +79,31 @@ export const PlayByPlayModal: React.FC<PlayByPlayModalProps> = ({
   const playersWithEvents = React.useMemo(() => {
     if (!match?.events) return [];
     const map = new Map<string, { id: string; name: string; number?: number; count: number }>();
+    const addPlayerRef = (pId?: string, pNum?: number, fallbackName?: string) => {
+      if (!pId && pNum === undefined) return;
+      const key = pId || `num-${pNum}`;
+      const existing = map.get(key);
+      if (existing) {
+        existing.count += 1;
+      } else {
+        const matched = findPlayerForEvent({ playerId: pId, playerNumber: pNum }, rosterPlayers);
+        const displayName = matched
+          ? getPlayerFullName(matched)
+          : fallbackName?.trim() || (pNum !== undefined ? `Zawodnik #${pNum}` : 'Zawodnik');
+        map.set(key, {
+          id: key,
+          name: displayName,
+          number: matched?.number ?? pNum,
+          count: 1,
+        });
+      }
+    };
+
     match.events.forEach((e) => {
-      if (e.team === 'our' && (e.playerId || e.playerNumber !== undefined)) {
-        const key = e.playerId || `num-${e.playerNumber}`;
-        const existing = map.get(key);
-        if (existing) {
-          existing.count += 1;
-        } else {
-          const matched = findPlayerForEvent(e, rosterPlayers);
-          const displayName = matched
-            ? getPlayerFullName(matched)
-            : e.playerName?.trim() || (e.playerNumber !== undefined ? `Zawodnik #${e.playerNumber}` : 'Zawodnik');
-          map.set(key, {
-            id: key,
-            name: displayName,
-            number: matched?.number ?? e.playerNumber,
-            count: 1,
-          });
+      if (e.team === 'our') {
+        addPlayerRef(e.playerId, e.playerNumber, e.playerName);
+        if (e.subOutPlayerId || e.subOutPlayerNumber !== undefined) {
+          addPlayerRef(e.subOutPlayerId, e.subOutPlayerNumber);
         }
       }
     });
@@ -107,8 +119,16 @@ export const PlayByPlayModal: React.FC<PlayByPlayModalProps> = ({
         if (selectedPlayerId !== 'all') {
           if (selectedPlayerId.startsWith('num-')) {
             const num = Number(selectedPlayerId.slice(4));
-            if (e.playerNumber !== num || e.team !== 'our') return false;
-          } else if (e.playerId !== selectedPlayerId) {
+            if (
+              e.team !== 'our' ||
+              (e.playerNumber !== num && e.subOutPlayerNumber !== num)
+            ) {
+              return false;
+            }
+          } else if (
+            e.playerId !== selectedPlayerId &&
+            e.subOutPlayerId !== selectedPlayerId
+          ) {
             return false;
           }
         }
@@ -292,6 +312,10 @@ export const PlayByPlayModal: React.FC<PlayByPlayModalProps> = ({
                 label: e.type,
                 badge: 'bg-slate-800 text-slate-300 border-slate-700',
               };
+              const subLabels =
+                e.type === 'SUBSTITUTION'
+                  ? resolveSubstitutionLabels(e, rosterPlayers, true)
+                  : null;
 
               return (
                 <div
@@ -302,7 +326,7 @@ export const PlayByPlayModal: React.FC<PlayByPlayModalProps> = ({
                     {/* Quarter & Time tag */}
                     <div className="flex flex-col items-center justify-center bg-slate-900 px-2 py-1 rounded-lg border border-slate-800 shrink-0 font-mono text-center">
                       <span className="text-[10px] text-amber-400 font-bold leading-none">
-                        Q{e.quarter}
+                        {e.quarter > 4 ? 'OT' : `Q${e.quarter}`}
                       </span>
                       <span className="text-xs text-slate-300 font-semibold leading-none mt-0.5">
                         {e.gameClock}
@@ -312,7 +336,13 @@ export const PlayByPlayModal: React.FC<PlayByPlayModalProps> = ({
                     {/* Action & Player info */}
                     <div className="min-w-0">
                       <div className="flex items-center gap-2 flex-wrap">
-                        {e.playerId || e.playerNumber !== undefined ? (
+                        {e.type === 'SUBSTITUTION' && subLabels ? (
+                          <span className="font-mono font-bold text-xs flex items-center gap-1.5 flex-wrap">
+                            <span className="text-rose-300">{subLabels.outLabel || 'Zawodnik'}</span>
+                            <span className="text-slate-400">➔</span>
+                            <span className="text-emerald-300">{subLabels.inLabel || 'Zawodnik'}</span>
+                          </span>
+                        ) : e.playerId || e.playerNumber !== undefined ? (
                           <span className="font-mono font-bold text-amber-400 text-xs">
                             {resolveEventPlayerLabel(e, rosterPlayers, true)}
                           </span>

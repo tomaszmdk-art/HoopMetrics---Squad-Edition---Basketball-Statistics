@@ -11,7 +11,11 @@ import {
 } from '../types/basketball';
 import { calculatePlayerStats, calculateTeamStats } from './statsCalculator';
 import { getClubProfile } from './db';
-import { getPlayerFullName, resolveEventPlayerLabel } from './playerDisplay';
+import {
+  getPlayerFullName,
+  resolveEventPlayerLabel,
+  resolveSubstitutionLabels,
+} from './playerDisplay';
 
 let cachedRegularFontBase64: string | null = null;
 let cachedBoldFontBase64: string | null = null;
@@ -131,6 +135,9 @@ const ACTION_DESCRIPTIONS: Record<string, string> = {
   'MANUAL_OUR_PLUS_2': 'Ręczna korekta UKS (+2)',
   'MANUAL_OUR_PLUS_3': 'Ręczna korekta UKS (+3)',
   'MANUAL_OUR_MINUS_1': 'Ręczna korekta UKS (-1)',
+  'SUBSTITUTION': 'Zmiana zawodnika',
+  'SUB_IN': 'Wejście na parkiet',
+  'SUB_OUT': 'Zejście na ławkę',
 };
 
 // 1. Export Complete Match Report (Box Score + Leaders + Play-by-Play + Individual Player Pages with Photos)
@@ -443,6 +450,20 @@ export async function exportMatchPdf(
     ];
 
     const pbpRows = match.events.map((e, idx) => {
+      if (e.type === 'SUBSTITUTION') {
+        const { inLabel, outLabel } = resolveSubstitutionLabels(e, rosterPlayers, allowPii);
+        const playerStr = `${outLabel || '-'} -> ${inLabel || '-'}`;
+        const desc = `Zmiana: schodzi ${outLabel || '-'}, wchodzi ${inLabel || '-'}`;
+        return [
+          idx + 1,
+          e.quarter > 4 ? 'OT' : `Q${e.quarter}`,
+          e.gameClock,
+          `${e.ourScoreAfter} : ${e.oppScoreAfter}`,
+          playerStr,
+          desc,
+        ];
+      }
+
       const baseDesc = ACTION_DESCRIPTIONS[e.type] || e.type.replace('_', ' ');
       const desc = e.subType ? `${baseDesc} (${e.subType})` : baseDesc;
       const playerStr =
@@ -504,7 +525,9 @@ export async function exportMatchPdf(
     for (const player of sortedPlayersForPages) {
       doc.addPage('a4', 'landscape');
       const pStats = calculatePlayerStats(player, match.events, match);
-      const pEvents = match.events.filter((e) => e.playerId === player.id);
+      const pEvents = match.events.filter(
+        (e) => e.playerId === player.id || e.subOutPlayerId === player.id
+      );
 
       // Top Navy Header Bar
       doc.setFillColor(10, 25, 47);
@@ -790,7 +813,14 @@ export async function exportMatchPdf(
       }
 
       const pEventsFormatted = pEvents.map((ev, idx) => {
-        const actionLabel = ACTION_DESCRIPTIONS[ev.type] || ev.type.replace('_', ' ');
+        let actionLabel = ACTION_DESCRIPTIONS[ev.type] || ev.type.replace('_', ' ');
+        if (ev.type === 'SUBSTITUTION') {
+          const { inLabel, outLabel } = resolveSubstitutionLabels(ev, rosterPlayers, allowPii);
+          actionLabel =
+            ev.playerId === player.id
+              ? `Zmiana: wejście na parkiet (za: ${outLabel || '-'})`
+              : `Zmiana: zejście na ławkę (wszedł: ${inLabel || '-'})`;
+        }
         return [
           idx + 1,
           ev.quarter > 4 ? 'OT' : `Q${ev.quarter}`,

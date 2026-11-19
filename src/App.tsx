@@ -181,6 +181,7 @@ export default function App() {
   }, [serverPersistence]);
 
   const lastLocalWriteAtRef = useRef<number>(0);
+  const lastServerUpdatedRef = useRef<number>(0);
   const syncFingerprintsRef = useRef({
     club: '',
     players: '',
@@ -229,6 +230,7 @@ export default function App() {
       setRoomLoadError(null);
       setLobbyParentMode(false);
       setCurrentRoomId(normalizedRoomId);
+      lastServerUpdatedRef.current = 0;
       syncFingerprintsRef.current = { club: '', players: '', matches: '', activeMatch: '' };
 
       if (initialState) {
@@ -284,6 +286,7 @@ export default function App() {
     setIsShareModalOpen(false);
     setLobbyParentMode(false);
     setRoomLoadError(null);
+    lastServerUpdatedRef.current = 0;
     syncFingerprintsRef.current = { club: '', players: '', matches: '', activeMatch: '' };
     updateUrlForRoom(null, false);
   }, []);
@@ -293,6 +296,7 @@ export default function App() {
     const handlePopState = () => {
       const parsed = parseRoomFromUrl();
       setCurrentRoomId(parsed.roomId);
+      lastServerUpdatedRef.current = 0;
       syncFingerprintsRef.current = { club: '', players: '', matches: '', activeMatch: '' };
 
       if (!parsed.roomId) {
@@ -322,6 +326,13 @@ export default function App() {
   const applyServerRoomState = useCallback(
     (serverData: ServerSyncData, allowForCoach = false) => {
       if (!serverData || (serverData.roomId && serverData.roomId !== roomId)) return;
+
+      if (typeof serverData.lastUpdated === 'number' && serverData.lastUpdated > 0) {
+        lastServerUpdatedRef.current = Math.max(
+          lastServerUpdatedRef.current,
+          serverData.lastUpdated
+        );
+      }
 
       // Avoid echoing back our own local write immediately while clock/action is ticking
       if (!isReadOnlyViewer && !allowForCoach) {
@@ -488,6 +499,12 @@ export default function App() {
         }
 
         const serverData = roomRes.data || pendingCreated;
+        if (serverData && typeof serverData.lastUpdated === 'number' && serverData.lastUpdated > 0) {
+          lastServerUpdatedRef.current = Math.max(
+            lastServerUpdatedRef.current,
+            serverData.lastUpdated
+          );
+        }
         const explicitSpectator =
           typeof window !== 'undefined' &&
           (() => {
@@ -719,32 +736,56 @@ export default function App() {
     };
   }, [roomId, applyServerRoomState]);
 
-  // Fallback REST polling for Spectator mode if WebSocket is reconnecting/unavailable
+  const hasLiveMatchForSync = Boolean(
+    activeMatch?.status === 'live' || matches.some((m) => m.status === 'live')
+  );
+
+  // Adaptive conditional REST polling for Spectator mode:
+  // - Uses ?since=<lastUpdated> so unchanged polls return 304 without fetching full JSONB
+  // - Pauses automatically while the tab/screen is hidden and refreshes immediately on return
+  // - Polls every 1.5s during an active live match, 12s when idle, or 15s when WebSocket is active
   useEffect(() => {
     if (!roomId || !isReadOnlyViewer) return;
 
-    const pollRoom = async () => {
-      const { status, data } = await fetchRoomState(roomId, null);
-      if (status === 200 && data) {
-        applyServerRoomState(data, true);
+    let cancelled = false;
+    let isPollingInFlight = false;
+
+    const pollRoom = async (force = false) => {
+      if (cancelled || isPollingInFlight) return;
+      if (!force && typeof document !== 'undefined' && document.visibilityState === 'hidden') {
+        return;
+      }
+      isPollingInFlight = true;
+      try {
+        const since = lastServerUpdatedRef.current || undefined;
+        const { status, data } = await fetchRoomState(roomId, null, since);
+        if (!cancelled && status === 200 && data) {
+          applyServerRoomState(data, true);
+        }
+      } finally {
+        isPollingInFlight = false;
       }
     };
 
-    const interval = wsStatus === 'connected' ? 15000 : 3000;
-    const timer = setInterval(pollRoom, interval);
+    const intervalMs =
+      wsStatus === 'connected' ? 15000 : hasLiveMatchForSync ? 1500 : 12000;
+    const timer = setInterval(() => {
+      void pollRoom(false);
+    }, intervalMs);
 
     const handleVisibility = () => {
       if (document.visibilityState === 'visible') {
-        pollRoom();
+        void pollRoom(true);
       }
     };
     document.addEventListener('visibilitychange', handleVisibility);
 
     return () => {
+      cancelled = true;
       clearInterval(timer);
       document.removeEventListener('visibilitychange', handleVisibility);
     };
-  }, [roomId, isReadOnlyViewer, wsStatus, applyServerRoomState]);
+  }, [roomId, isReadOnlyViewer, wsStatus, hasLiveMatchForSync, applyServerRoomState]);
 
   // Same-browser cross-tab BroadcastChannel scoped strictly by roomId
   useEffect(() => {
@@ -816,7 +857,8 @@ export default function App() {
       current.events.length !== nextMatch.events.length ||
       current.ourScore !== nextMatch.ourScore ||
       current.opponentScore !== nextMatch.opponentScore ||
-      current.currentQuarter !== nextMatch.currentQuarter;
+      current.currentQuarter !== nextMatch.currentQuarter ||
+      current.isClockRunning !== nextMatch.isClockRunning;
 
     if (isScoreOrEventChange) {
       pushRoomStateImmediate(roomId, coachToken, {

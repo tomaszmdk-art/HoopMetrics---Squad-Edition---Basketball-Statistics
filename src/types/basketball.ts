@@ -80,7 +80,10 @@ export type ActionType =
   | 'MANUAL_OUR_PLUS_1'
   | 'MANUAL_OUR_PLUS_2'
   | 'MANUAL_OUR_PLUS_3'
-  | 'MANUAL_OUR_MINUS_1';
+  | 'MANUAL_OUR_MINUS_1'
+  | 'SUBSTITUTION'
+  | 'SUB_IN'
+  | 'SUB_OUT';
 
 export interface MatchEvent {
   id: string;
@@ -95,6 +98,8 @@ export interface MatchEvent {
   playerId?: string;
   playerName?: string;
   playerNumber?: number;
+  subOutPlayerId?: string;
+  subOutPlayerNumber?: number;
   assistedByPlayerId?: string;
   assistedByPlayerName?: string;
   subType?: string; // np. Błąd kozłowania, Kroki, Podanie w aut, Wybicie, Szarża, Layup itp.

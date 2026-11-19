@@ -15,7 +15,11 @@ import {
 } from 'lucide-react';
 import { playClickSound, triggerHaptic } from '../services/tts';
 import { LiveMatchTheme, TileFontFamily } from '../types/liveMatchTheme';
-import { getPlayerFullName, getPlayerShortName } from '../services/playerDisplay';
+import {
+  createSubstitutionEvent,
+  getPlayerFullName,
+  getPlayerShortName,
+} from '../services/playerDisplay';
 
 const formatNumAndName = (p: Player): string => {
   const n = p.lastName?.trim() || p.firstName?.trim();
@@ -104,9 +108,17 @@ export const PlayerSelector: React.FC<PlayerSelectorProps> = ({
       const newOnCourt = prev.onCourtPlayerIds.map((id) =>
         id === courtPlayerId ? benchPlayerId : id
       );
+      const subEvent = createSubstitutionEvent(prev, {
+        type: 'SUBSTITUTION',
+        inPlayer: benchPlayer,
+        outPlayer: courtPlayer,
+        nextOnCourt: newOnCourt,
+      });
       return {
         ...prev,
         onCourtPlayerIds: newOnCourt,
+        events: [...prev.events, subEvent],
+        updatedAt: Date.now(),
       };
     });
 
@@ -172,11 +184,25 @@ export const PlayerSelector: React.FC<PlayerSelectorProps> = ({
 
     // If court has fewer than 5 players, just add them directly!
     if (match.onCourtPlayerIds.length < 5) {
-      onUpdateMatch((prev) => ({
-        ...prev,
-        onCourtPlayerIds: [...prev.onCourtPlayerIds, playerId],
-      }));
-      setLastSwapMessage(`Dodano na parkiet: #${rosterPlayers.find((p) => p.id === playerId)?.number}`);
+      const targetPlayer = rosterPlayers.find((p) => p.id === playerId);
+      onUpdateMatch((prev) => {
+        if (prev.onCourtPlayerIds.includes(playerId) || prev.onCourtPlayerIds.length >= 5) {
+          return prev;
+        }
+        const nextOnCourt = [...prev.onCourtPlayerIds, playerId];
+        const subEvent = createSubstitutionEvent(prev, {
+          type: 'SUB_IN',
+          inPlayer: targetPlayer,
+          nextOnCourt,
+        });
+        return {
+          ...prev,
+          onCourtPlayerIds: nextOnCourt,
+          events: [...prev.events, subEvent],
+          updatedAt: Date.now(),
+        };
+      });
+      setLastSwapMessage(`Dodano na parkiet: #${targetPlayer?.number}`);
       setSubBenchPlayerId(null);
       return;
     }
@@ -193,23 +219,38 @@ export const PlayerSelector: React.FC<PlayerSelectorProps> = ({
   const handleTogglePlayerInFive = (playerId: string) => {
     playClickSound();
     triggerHaptic(20);
+    const targetPlayer = rosterPlayers.find((p) => p.id === playerId);
 
     onUpdateMatch((prev) => {
       const isOnCourt = prev.onCourtPlayerIds.includes(playerId);
       if (isOnCourt) {
-        // Remove from court
+        const nextOnCourt = prev.onCourtPlayerIds.filter((id) => id !== playerId);
+        const subEvent = createSubstitutionEvent(prev, {
+          type: 'SUB_OUT',
+          outPlayer: targetPlayer,
+          nextOnCourt,
+        });
         return {
           ...prev,
-          onCourtPlayerIds: prev.onCourtPlayerIds.filter((id) => id !== playerId),
+          onCourtPlayerIds: nextOnCourt,
+          events: [...prev.events, subEvent],
+          updatedAt: Date.now(),
         };
       } else {
-        // Add if not exceeding 5
         if (prev.onCourtPlayerIds.length >= 5) {
           return prev;
         }
+        const nextOnCourt = [...prev.onCourtPlayerIds, playerId];
+        const subEvent = createSubstitutionEvent(prev, {
+          type: 'SUB_IN',
+          inPlayer: targetPlayer,
+          nextOnCourt,
+        });
         return {
           ...prev,
-          onCourtPlayerIds: [...prev.onCourtPlayerIds, playerId],
+          onCourtPlayerIds: nextOnCourt,
+          events: [...prev.events, subEvent],
+          updatedAt: Date.now(),
         };
       }
     });
@@ -222,10 +263,48 @@ export const PlayerSelector: React.FC<PlayerSelectorProps> = ({
     triggerHaptic(50);
 
     const newFive = benchPlayers.slice(0, 5).map((p) => p.id);
-    onUpdateMatch((prev) => ({
-      ...prev,
-      onCourtPlayerIds: newFive,
-    }));
+    onUpdateMatch((prev) => {
+      const leavingIds = prev.onCourtPlayerIds.filter((id) => !newFive.includes(id));
+      const enteringIds = newFive.filter((id) => !prev.onCourtPlayerIds.includes(id));
+      const pairCount = Math.min(leavingIds.length, enteringIds.length);
+      const subEvents = [];
+
+      for (let i = 0; i < pairCount; i++) {
+        subEvents.push(
+          createSubstitutionEvent(prev, {
+            type: 'SUBSTITUTION',
+            outPlayer: rosterPlayers.find((p) => p.id === leavingIds[i]),
+            inPlayer: rosterPlayers.find((p) => p.id === enteringIds[i]),
+            nextOnCourt: newFive,
+          })
+        );
+      }
+      for (let i = pairCount; i < leavingIds.length; i++) {
+        subEvents.push(
+          createSubstitutionEvent(prev, {
+            type: 'SUB_OUT',
+            outPlayer: rosterPlayers.find((p) => p.id === leavingIds[i]),
+            nextOnCourt: newFive,
+          })
+        );
+      }
+      for (let i = pairCount; i < enteringIds.length; i++) {
+        subEvents.push(
+          createSubstitutionEvent(prev, {
+            type: 'SUB_IN',
+            inPlayer: rosterPlayers.find((p) => p.id === enteringIds[i]),
+            nextOnCourt: newFive,
+          })
+        );
+      }
+
+      return {
+        ...prev,
+        onCourtPlayerIds: newFive,
+        events: [...prev.events, ...subEvents],
+        updatedAt: Date.now(),
+      };
+    });
     setLastSwapMessage(`Wymieniono całą piątkę na rezerwowych!`);
     setSubCourtPlayerId(null);
     setSubBenchPlayerId(null);
@@ -234,10 +313,21 @@ export const PlayerSelector: React.FC<PlayerSelectorProps> = ({
   const handleClearCourt = () => {
     playClickSound();
     triggerHaptic(30);
-    onUpdateMatch((prev) => ({
-      ...prev,
-      onCourtPlayerIds: [],
-    }));
+    onUpdateMatch((prev) => {
+      const subEvents = prev.onCourtPlayerIds.map((id) =>
+        createSubstitutionEvent(prev, {
+          type: 'SUB_OUT',
+          outPlayer: rosterPlayers.find((p) => p.id === id),
+          nextOnCourt: [],
+        })
+      );
+      return {
+        ...prev,
+        onCourtPlayerIds: [],
+        events: [...prev.events, ...subEvents],
+        updatedAt: Date.now(),
+      };
+    });
     setLastSwapMessage(`Parkiet wyczyszczony. Wybierz 5 zawodników.`);
   };
 

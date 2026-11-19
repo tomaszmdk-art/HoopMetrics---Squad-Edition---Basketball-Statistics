@@ -5,6 +5,7 @@ import {
   findPlayerForEvent,
   getPlayerFullName,
   resolveEventAssistLabel,
+  resolveSubstitutionLabels,
 } from '../services/playerDisplay';
 
 interface LiveSpectatorActionPopupProps {
@@ -196,6 +197,30 @@ export const PROTOCOL_ACTION_META: Record<
     icon: '✏️',
     category: 'score',
   },
+  'SUBSTITUTION': {
+    label: 'Zmiana zawodnika',
+    badgeClass: 'bg-orange-500/20 text-orange-300 border-orange-500/40',
+    borderClass: 'border-orange-500/60',
+    glowClass: 'shadow-orange-500/20',
+    icon: '🔄',
+    category: 'substitution',
+  },
+  'SUB_IN': {
+    label: 'Wejście na parkiet',
+    badgeClass: 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40',
+    borderClass: 'border-emerald-500/60',
+    glowClass: 'shadow-emerald-500/20',
+    icon: '⬆️',
+    category: 'substitution',
+  },
+  'SUB_OUT': {
+    label: 'Zejście na ławkę',
+    badgeClass: 'bg-slate-800 text-slate-300 border-slate-700',
+    borderClass: 'border-slate-700',
+    glowClass: 'shadow-slate-900/40',
+    icon: '⬇️',
+    category: 'substitution',
+  },
 };
 
 export const LiveSpectatorActionPopup: React.FC<LiveSpectatorActionPopupProps> = ({
@@ -359,6 +384,19 @@ export const LiveSpectatorActionPopup: React.FC<LiveSpectatorActionPopupProps> =
                 {meta.label}
               </span>
             </div>
+
+            {/* Substitution pair details */}
+            {event.type === 'SUBSTITUTION' && (() => {
+              const { inLabel, outLabel } = resolveSubstitutionLabels(event, players, true);
+              if (!inLabel && !outLabel) return null;
+              return (
+                <div className="flex items-center gap-2 text-xs font-semibold text-slate-200 bg-slate-900 px-2.5 py-1.5 rounded-xl border border-slate-700 flex-wrap">
+                  <span className="text-rose-300">Schodzi: {outLabel || '-'}</span>
+                  <span className="text-slate-500">➔</span>
+                  <span className="text-emerald-300">Wchodzi: {inLabel || '-'}</span>
+                </div>
+              );
+            })()}
 
             {/* Sub-type details (e.g. Layup, Kroki, etc.) */}
             {event.subType && (

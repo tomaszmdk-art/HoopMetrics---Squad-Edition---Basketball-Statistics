@@ -13,6 +13,7 @@ import {
   RotateCcw,
 } from 'lucide-react';
 import { playClickSound, triggerHaptic } from '../services/tts';
+import { createSubstitutionEvent } from '../services/playerDisplay';
 
 const formatNumAndName = (p: Player): string => {
   const n = p.lastName?.trim() || p.firstName?.trim();
@@ -27,6 +28,7 @@ const getCardSecondaryName = (p: Player): string =>
 
 export interface SubRecord {
   id: string;
+  eventId?: string;
   outPlayer: Player;
   inPlayer: Player;
   time: string;
@@ -75,14 +77,24 @@ export const SubstitutionModal: React.FC<SubstitutionModalProps> = ({
 
     const courtPlayer = rosterPlayers.find((p) => p.id === courtPlayerId);
     const benchPlayer = rosterPlayers.find((p) => p.id === benchPlayerId);
+    const eventId = `evt-sub-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
 
     onUpdateMatch((prev) => {
       const newOnCourt = prev.onCourtPlayerIds.map((id) =>
         id === courtPlayerId ? benchPlayerId : id
       );
+      const subEvent = createSubstitutionEvent(prev, {
+        type: 'SUBSTITUTION',
+        inPlayer: benchPlayer,
+        outPlayer: courtPlayer,
+        nextOnCourt: newOnCourt,
+        eventId,
+      });
       return {
         ...prev,
         onCourtPlayerIds: newOnCourt,
+        events: [...prev.events, subEvent],
+        updatedAt: Date.now(),
       };
     });
 
@@ -98,6 +110,7 @@ export const SubstitutionModal: React.FC<SubstitutionModalProps> = ({
       setSubHistory((prev) => [
         {
           id: `${Date.now()}-${Math.random()}`,
+          eventId,
           outPlayer: courtPlayer,
           inPlayer: benchPlayer,
           time: nowStr,
@@ -152,10 +165,48 @@ export const SubstitutionModal: React.FC<SubstitutionModalProps> = ({
     triggerHaptic(50);
 
     const newFiveIds = benchPlayers.slice(0, 5).map((p) => p.id);
-    onUpdateMatch((prev) => ({
-      ...prev,
-      onCourtPlayerIds: newFiveIds,
-    }));
+    onUpdateMatch((prev) => {
+      const leavingIds = prev.onCourtPlayerIds.filter((id) => !newFiveIds.includes(id));
+      const enteringIds = newFiveIds.filter((id) => !prev.onCourtPlayerIds.includes(id));
+      const pairCount = Math.min(leavingIds.length, enteringIds.length);
+      const subEvents = [];
+
+      for (let i = 0; i < pairCount; i++) {
+        subEvents.push(
+          createSubstitutionEvent(prev, {
+            type: 'SUBSTITUTION',
+            outPlayer: rosterPlayers.find((p) => p.id === leavingIds[i]),
+            inPlayer: rosterPlayers.find((p) => p.id === enteringIds[i]),
+            nextOnCourt: newFiveIds,
+          })
+        );
+      }
+      for (let i = pairCount; i < leavingIds.length; i++) {
+        subEvents.push(
+          createSubstitutionEvent(prev, {
+            type: 'SUB_OUT',
+            outPlayer: rosterPlayers.find((p) => p.id === leavingIds[i]),
+            nextOnCourt: newFiveIds,
+          })
+        );
+      }
+      for (let i = pairCount; i < enteringIds.length; i++) {
+        subEvents.push(
+          createSubstitutionEvent(prev, {
+            type: 'SUB_IN',
+            inPlayer: rosterPlayers.find((p) => p.id === enteringIds[i]),
+            nextOnCourt: newFiveIds,
+          })
+        );
+      }
+
+      return {
+        ...prev,
+        onCourtPlayerIds: newFiveIds,
+        events: [...prev.events, ...subEvents],
+        updatedAt: Date.now(),
+      };
+    });
 
     if (newFiveIds.length > 0) {
       onSelectPlayer(newFiveIds[0]);
@@ -166,20 +217,37 @@ export const SubstitutionModal: React.FC<SubstitutionModalProps> = ({
   const handleToggleLineupPlayer = (playerId: string) => {
     playClickSound();
     triggerHaptic(20);
+    const targetPlayer = rosterPlayers.find((p) => p.id === playerId);
 
     onUpdateMatch((prev) => {
       const current = prev.onCourtPlayerIds;
       if (current.includes(playerId)) {
         if (current.length <= 1) return prev;
+        const nextOnCourt = current.filter((id) => id !== playerId);
+        const subEvent = createSubstitutionEvent(prev, {
+          type: 'SUB_OUT',
+          outPlayer: targetPlayer,
+          nextOnCourt,
+        });
         return {
           ...prev,
-          onCourtPlayerIds: current.filter((id) => id !== playerId),
+          onCourtPlayerIds: nextOnCourt,
+          events: [...prev.events, subEvent],
+          updatedAt: Date.now(),
         };
       } else {
         if (current.length >= 5) return prev;
+        const nextOnCourt = [...current, playerId];
+        const subEvent = createSubstitutionEvent(prev, {
+          type: 'SUB_IN',
+          inPlayer: targetPlayer,
+          nextOnCourt,
+        });
         return {
           ...prev,
-          onCourtPlayerIds: [...current, playerId],
+          onCourtPlayerIds: nextOnCourt,
+          events: [...prev.events, subEvent],
+          updatedAt: Date.now(),
         };
       }
     });
@@ -196,6 +264,10 @@ export const SubstitutionModal: React.FC<SubstitutionModalProps> = ({
       return {
         ...prev,
         onCourtPlayerIds: newOnCourt,
+        events: record.eventId
+          ? prev.events.filter((e) => e.id !== record.eventId)
+          : prev.events,
+        updatedAt: Date.now(),
       };
     });
 

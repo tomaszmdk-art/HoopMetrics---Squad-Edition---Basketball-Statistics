@@ -47,6 +47,9 @@ const ACTION_LABELS: Record<string, string> = {
   'OPP_2PT': '+2 Rywal',
   'OPP_3PT': '+3 Rywal',
   'OPP_MINUS_1': '-1 Rywal',
+  'SUBSTITUTION': 'Zmiana',
+  'SUB_IN': 'Wejście',
+  'SUB_OUT': 'Zejście',
 };
 
 // Sub-options for Extended Stats Mode
