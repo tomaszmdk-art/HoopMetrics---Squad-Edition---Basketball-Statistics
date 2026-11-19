@@ -137,27 +137,27 @@ export const SpectatorPlayerTracker: React.FC<SpectatorPlayerTrackerProps> = ({
     stats.plusMinus > 0 ? `+${stats.plusMinus}` : `${stats.plusMinus}`;
 
   return (
-    <div className="w-full max-w-3xl mx-auto bg-slate-900 border border-slate-800 rounded-2xl p-2.5 sm:p-3 shadow-lg text-slate-100">
+    <div className="w-full max-w-4xl mx-auto bg-slate-900 border border-slate-800 rounded-2xl p-3 sm:p-3.5 shadow-lg text-slate-100">
       {/* Compact Header Row: Player identity + status + Switch player */}
       <div className="flex items-center justify-between gap-2 pb-2 border-b border-slate-800">
-        <div className="flex items-center gap-2 min-w-0">
+        <div className="flex items-center gap-2.5 min-w-0">
           {trackedPlayer.photo ? (
             <img
               src={trackedPlayer.photo}
               alt={formatDisplayName(trackedPlayer)}
-              className="w-8 h-8 rounded-lg object-cover border border-slate-700 shrink-0"
+              className="w-9 h-9 rounded-lg object-cover border border-slate-700 shrink-0"
             />
           ) : (
-            <div className="w-8 h-8 rounded-lg bg-amber-500/15 border border-amber-500/40 flex items-center justify-center font-mono tabular-nums font-black text-xs text-amber-400 shrink-0">
+            <div className="w-9 h-9 rounded-lg bg-amber-500/15 border border-amber-500/40 flex items-center justify-center font-mono tabular-nums font-black text-sm text-amber-400 shrink-0">
               #{trackedPlayer.number}
             </div>
           )}
 
           <div className="min-w-0">
-            <div className="text-xs sm:text-sm font-black text-white truncate leading-tight">
+            <div className="text-sm sm:text-base font-black text-white truncate leading-tight">
               {formatDisplayName(trackedPlayer)}
             </div>
-            <div className="text-[11px] text-slate-400 truncate leading-tight mt-0.5">
+            <div className="text-xs sm:text-sm text-slate-400 truncate leading-tight mt-0.5">
               <span className={isOnCourt ? 'text-emerald-400 font-semibold' : 'text-slate-400'}>
                 {isOnCourt ? 'Na parkiecie' : 'Na ławce'}
               </span>
@@ -173,7 +173,7 @@ export const SpectatorPlayerTracker: React.FC<SpectatorPlayerTrackerProps> = ({
             playClickSound();
             setShowPicker(true);
           }}
-          className="flex items-center gap-1.5 px-2.5 py-1.5 min-h-[36px] rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 text-xs font-bold transition active:scale-95 whitespace-nowrap shrink-0"
+          className="flex items-center gap-1.5 px-3 py-1.5 min-h-[36px] rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 text-xs sm:text-sm font-bold transition active:scale-95 whitespace-nowrap shrink-0"
           title="Wybierz innego zawodnika do śledzenia"
         >
           <ArrowLeftRight className="w-3.5 h-3.5 text-amber-400 shrink-0" />
@@ -184,20 +184,20 @@ export const SpectatorPlayerTracker: React.FC<SpectatorPlayerTrackerProps> = ({
       {/* Headline Metrics Row: PKT / EVAL / +/- */}
       <div className="grid grid-cols-3 divide-x divide-slate-800 py-2">
         <div className="flex flex-col items-center justify-center px-1">
-          <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">
+          <span className="text-sm sm:text-base font-bold text-slate-400 uppercase tracking-wider">
             Punkty
           </span>
-          <span className="font-mono tabular-nums font-black text-xl sm:text-2xl text-amber-300 leading-tight mt-0.5">
+          <span className="font-mono tabular-nums font-black text-3xl sm:text-4xl text-amber-300 leading-none mt-1">
             {stats.pts}
           </span>
         </div>
 
         <div className="flex flex-col items-center justify-center px-1">
-          <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">
+          <span className="text-sm sm:text-base font-bold text-slate-400 uppercase tracking-wider">
             EVAL
           </span>
           <span
-            className={`font-mono tabular-nums font-black text-xl sm:text-2xl leading-tight mt-0.5 ${
+            className={`font-mono tabular-nums font-black text-3xl sm:text-4xl leading-none mt-1 ${
               stats.eval > 0
                 ? 'text-emerald-400'
                 : stats.eval < 0
@@ -210,11 +210,11 @@ export const SpectatorPlayerTracker: React.FC<SpectatorPlayerTrackerProps> = ({
         </div>
 
         <div className="flex flex-col items-center justify-center px-1">
-          <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">
+          <span className="text-sm sm:text-base font-bold text-slate-400 uppercase tracking-wider">
             +/-
           </span>
           <span
-            className={`font-mono tabular-nums font-black text-xl sm:text-2xl leading-tight mt-0.5 ${
+            className={`font-mono tabular-nums font-black text-3xl sm:text-4xl leading-none mt-1 ${
               stats.plusMinus > 0
                 ? 'text-emerald-400'
                 : stats.plusMinus < 0
@@ -227,50 +227,44 @@ export const SpectatorPlayerTracker: React.FC<SpectatorPlayerTrackerProps> = ({
         </div>
       </div>
 
-      {/* Compact Box Score Line Table */}
-      <div className="border-t border-slate-800 pt-2 overflow-x-auto scrollbar-none">
-        <table className="w-full text-center font-mono tabular-nums border-collapse text-[11px]">
-          <thead>
-            <tr className="text-[10px] text-slate-400 font-semibold">
-              <th className="px-1.5 py-0.5 font-semibold">2P</th>
-              <th className="px-1.5 py-0.5 font-semibold">3P</th>
-              <th className="px-1.5 py-0.5 font-semibold">FT</th>
-              <th className="px-1.5 py-0.5 font-semibold">FG%</th>
-              <th className="px-1.5 py-0.5 font-semibold">ZB</th>
-              <th className="px-1.5 py-0.5 font-semibold">AS</th>
-              <th className="px-1.5 py-0.5 font-semibold">PRZ</th>
-              <th className="px-1.5 py-0.5 font-semibold">BLK</th>
-              <th className="px-1.5 py-0.5 font-semibold">STR</th>
-              <th className="px-1.5 py-0.5 font-semibold">PF</th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr className="text-slate-100 font-bold">
-              <td className="px-1.5 py-0.5 whitespace-nowrap">
-                {stats.fg2m}/{stats.fg2a}
-              </td>
-              <td className="px-1.5 py-0.5 whitespace-nowrap">
-                {stats.fg3m}/{stats.fg3a}
-              </td>
-              <td className="px-1.5 py-0.5 whitespace-nowrap">
-                {stats.ftm}/{stats.fta}
-              </td>
-              <td className="px-1.5 py-0.5 whitespace-nowrap text-amber-300">
-                {stats.fgPct}%
-              </td>
-              <td className="px-1.5 py-0.5 whitespace-nowrap" title={`Atak: ${stats.offReb} / Obrona: ${stats.defReb}`}>
-                {stats.totReb}
-              </td>
-              <td className="px-1.5 py-0.5 whitespace-nowrap">{stats.ast}</td>
-              <td className="px-1.5 py-0.5 whitespace-nowrap">{stats.stl}</td>
-              <td className="px-1.5 py-0.5 whitespace-nowrap">{stats.blk}</td>
-              <td className="px-1.5 py-0.5 whitespace-nowrap text-rose-300">{stats.tov}</td>
-              <td className={`px-1.5 py-0.5 whitespace-nowrap ${stats.fouls >= 4 ? 'text-rose-400' : ''}`}>
-                {stats.fouls}
-              </td>
-            </tr>
-          </tbody>
-        </table>
+      {/* Enlarged (2x) Compact Box Score Grid Table */}
+      <div className="border-t border-slate-800 pt-2">
+        <div className="grid grid-cols-5 md:grid-cols-10 gap-y-2 text-center font-mono tabular-nums">
+          {[
+            { label: '2P', value: `${stats.fg2m}/${stats.fg2a}`, cls: 'text-slate-100' },
+            { label: '3P', value: `${stats.fg3m}/${stats.fg3a}`, cls: 'text-slate-100' },
+            { label: 'FT', value: `${stats.ftm}/${stats.fta}`, cls: 'text-slate-100' },
+            { label: 'FG%', value: `${stats.fgPct}%`, cls: 'text-amber-300' },
+            {
+              label: 'ZB',
+              value: `${stats.totReb}`,
+              cls: 'text-slate-100',
+              title: `Atak: ${stats.offReb} / Obrona: ${stats.defReb}`,
+            },
+            { label: 'AS', value: `${stats.ast}`, cls: 'text-slate-100' },
+            { label: 'PRZ', value: `${stats.stl}`, cls: 'text-slate-100' },
+            { label: 'BLK', value: `${stats.blk}`, cls: 'text-slate-100' },
+            { label: 'STR', value: `${stats.tov}`, cls: 'text-rose-300' },
+            {
+              label: 'PF',
+              value: `${stats.fouls}`,
+              cls: stats.fouls >= 4 ? 'text-rose-400' : 'text-slate-100',
+            },
+          ].map((cell) => (
+            <div
+              key={cell.label}
+              title={cell.title}
+              className="flex flex-col items-center justify-center px-1 border-r border-slate-800/70 last:border-r-0 [&:nth-child(5)]:border-r-0 md:[&:nth-child(5)]:border-r"
+            >
+              <span className="text-sm sm:text-base font-bold text-slate-400 leading-tight">
+                {cell.label}
+              </span>
+              <span className={`text-xl sm:text-2xl font-black leading-tight mt-0.5 whitespace-nowrap ${cell.cls}`}>
+                {cell.value}
+              </span>
+            </div>
+          ))}
+        </div>
       </div>
     </div>
   );

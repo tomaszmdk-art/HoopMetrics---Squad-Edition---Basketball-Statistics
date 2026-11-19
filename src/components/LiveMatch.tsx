@@ -573,14 +573,28 @@ export const LiveMatch: React.FC<LiveMatchProps> = ({
             </div>
           )}
 
-          {/* Tab 3: Compact Single-Player Tracker directly under Scoreboard */}
+          {/* Tab 3: Compact Single-Player Tracker + Active Protocol with Highlighted Actions */}
           {spectatorTab === 'player-tracker' && (
-            <SpectatorPlayerTracker
-              match={match}
-              players={rosterPlayers.length > 0 ? rosterPlayers : players}
-              selectedPlayerId={trackedPlayerId}
-              onSelectPlayer={setTrackedPlayerId}
-            />
+            <div className="space-y-3">
+              <SpectatorPlayerTracker
+                match={match}
+                players={rosterPlayers.length > 0 ? rosterPlayers : players}
+                selectedPlayerId={trackedPlayerId}
+                onSelectPlayer={setTrackedPlayerId}
+              />
+              <LivePlayByPlayStream
+                match={match}
+                clubProfile={clubProfile}
+                rosterPlayers={rosterPlayers.length > 0 ? rosterPlayers : players}
+                readOnly={true}
+                highlightedPlayerId={trackedPlayerId}
+                highlightedPlayerNumber={
+                  (rosterPlayers.length > 0 ? rosterPlayers : players).find(
+                    (p) => p.id === trackedPlayerId
+                  )?.number
+                }
+              />
+            </div>
           )}
         </div>
       ) : (

@@ -28,6 +28,8 @@ interface LivePlayByPlayStreamProps {
   clubProfile?: ClubProfile;
   rosterPlayers?: Player[];
   readOnly?: boolean;
+  highlightedPlayerId?: string | null;
+  highlightedPlayerNumber?: number;
 }
 
 const ACTION_DESCRIPTIONS: Record<
@@ -154,6 +156,8 @@ export const LivePlayByPlayStream: React.FC<LivePlayByPlayStreamProps> = ({
   match,
   clubProfile,
   rosterPlayers = [],
+  highlightedPlayerId = null,
+  highlightedPlayerNumber,
 }) => {
   const [selectedQuarter, setSelectedQuarter] = useState<number | 'all'>('all');
   const [selectedCategory, setSelectedCategory] = useState<string>('all');
@@ -461,19 +465,38 @@ export const LivePlayByPlayStream: React.FC<LivePlayByPlayStreamProps> = ({
               };
               const isScoreAction = e.points > 0;
               const isRecent = index === 0;
+              const isHighlightedPlayer = Boolean(
+                highlightedPlayerId &&
+                  e.team === 'our' &&
+                  (e.playerId === highlightedPlayerId ||
+                    e.assistedByPlayerId === highlightedPlayerId ||
+                    (highlightedPlayerNumber !== undefined &&
+                      !e.playerId &&
+                      e.playerNumber === highlightedPlayerNumber))
+              );
 
               return (
                 <div
                   key={e.id}
                   className={`p-3 rounded-xl border transition flex items-center justify-between gap-3 ${
-                    isRecent
-                      ? 'bg-slate-950/95 border-amber-500/50 ring-1 ring-amber-500/30 shadow-md'
-                      : 'bg-slate-950/70 border-slate-800/80 hover:border-slate-700'
+                    isHighlightedPlayer
+                      ? `bg-emerald-900/50 border-emerald-500/75 hover:border-emerald-400 shadow-sm ${
+                          isRecent ? 'ring-1 ring-emerald-400/70' : ''
+                        }`
+                      : isRecent
+                        ? 'bg-slate-950/95 border-amber-500/50 ring-1 ring-amber-500/30 shadow-md'
+                        : 'bg-slate-950/70 border-slate-800/80 hover:border-slate-700'
                   }`}
                 >
                   <div className="flex items-center gap-3 min-w-0 flex-1">
                     {/* Quarter & Game Clock */}
-                    <div className="flex flex-col items-center justify-center bg-slate-900 px-2 py-1 rounded-lg border border-slate-800 shrink-0 font-mono tabular-nums text-center min-w-[46px]">
+                    <div
+                      className={`flex flex-col items-center justify-center px-2 py-1 rounded-lg border shrink-0 font-mono tabular-nums text-center min-w-[46px] ${
+                        isHighlightedPlayer
+                          ? 'bg-emerald-950/90 border-emerald-700/70'
+                          : 'bg-slate-900 border-slate-800'
+                      }`}
+                    >
                       <span className="text-[10px] text-amber-400 font-bold leading-none">
                         {e.quarter > 4 ? 'OT' : `Q${e.quarter}`}
                       </span>
