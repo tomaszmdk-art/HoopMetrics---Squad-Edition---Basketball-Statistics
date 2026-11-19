@@ -71,7 +71,7 @@ export const LiveMatch: React.FC<LiveMatchProps> = ({
   const [isSubModalOpen, setIsSubModalOpen] = useState(false);
   const [showBoxScore, setShowBoxScore] = useState(false);
   const [showPlayByPlay, setShowPlayByPlay] = useState(false);
-  const [spectatorTab, setSpectatorTab] = useState<'boxscore' | 'plays'>('boxscore');
+  const [spectatorTab, setSpectatorTab] = useState<'plays' | 'boxscore'>('plays');
 
   // Spectator mode: 3-second self-dismissing large popup on new match action
   const [liveActionPopupEvent, setLiveActionPopupEvent] = useState<MatchEvent | null>(null);
@@ -415,46 +415,22 @@ export const LiveMatch: React.FC<LiveMatchProps> = ({
 
   return (
     <div className="w-full flex-1 flex flex-col bg-slate-950 text-slate-100 min-h-full">
-      {/* 1. Scoreboard (Quarter, Clock, Official Headline Score, Opponent & Team Adjustments) */}
-      <ScoreBoard
-        match={match}
-        clubProfile={clubProfile}
-        onUpdateMatch={onUpdateMatch}
-        onRecordAction={handleRecordAction}
-        onToggleSound={onToggleSound}
-        soundEnabled={soundEnabled}
-        readOnly={readOnly}
-        liveTheme={liveTheme}
-        onOpenBoxScore={() => setShowBoxScore(true)}
-        onOpenPlayByPlay={() => setShowPlayByPlay(true)}
-        onFinishMatch={onFinishMatch}
-        statsMode={statsMode}
-        onToggleStatsMode={toggleStatsMode}
-        layoutMode={isTablet ? 'tablet' : 'mobile'}
-        viewMode={viewMode}
-        onSelectViewMode={handleSelectViewMode}
-      />
-
-      {/* READ-ONLY SPECTATOR VIEW */}
-      {readOnly ? (
-        <div className="flex-1 flex flex-col p-3 sm:p-5 max-w-5xl mx-auto w-full space-y-4">
-          {/* Spectator live status bar */}
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 p-3 rounded-2xl bg-slate-900 border border-slate-800 shadow-md">
-            <div className="flex items-center gap-2">
-              <span className="w-2.5 h-2.5 rounded-full bg-emerald-400" />
-              <span className="text-xs font-black tracking-wide text-white uppercase">
+      {/* READ-ONLY SPECTATOR TOP BAR (Above Scoreboard) */}
+      {readOnly && (
+        <div className="max-w-5xl mx-auto w-full px-3 sm:px-5 pt-2.5 pb-1">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 px-3.5 py-2.5 rounded-2xl bg-slate-900 border border-slate-800 shadow-md">
+            <div className="flex items-center gap-2.5 flex-wrap">
+              <span className="w-2 h-2 rounded-full bg-emerald-400 shrink-0" />
+              <span className="text-xs font-black tracking-wide text-white uppercase whitespace-nowrap">
                 PODGLĄD MECZU NA ŻYWO
               </span>
-              <span className="text-[10px] text-emerald-400 font-bold px-2 py-0.5 rounded-full bg-emerald-500/15 border border-emerald-500/30">
-                Tylko do odczytu
+              <span className="text-xs text-slate-400 whitespace-nowrap">
+                · Tylko do odczytu · <span className="font-mono tabular-nums font-bold text-amber-400">{match.events.length} akcji</span>
               </span>
             </div>
-            <div className="text-[11px] text-slate-400 flex items-center gap-2 sm:gap-3 flex-wrap">
-              <span>Wyniki i statystyki live</span>
-              <span className="font-mono font-bold text-amber-400 bg-slate-950 px-2 py-0.5 rounded-md border border-slate-800">
-                {match.events.length} akcji
-              </span>
+            <div className="flex items-center gap-2 flex-wrap">
               <button
+                type="button"
                 onClick={() => {
                   const ev =
                     match.events.length > 0
@@ -479,70 +455,104 @@ export const LiveMatch: React.FC<LiveMatchProps> = ({
                   if (soundEnabled) playScoreSound(ev.points || 2);
                   else playClickSound();
                 }}
-                className="flex items-center gap-1.5 px-2.5 py-1 rounded-xl bg-slate-800 hover:bg-slate-700 text-amber-400 border border-slate-700 text-xs font-bold transition active:scale-95 shadow-sm"
+                className="flex items-center gap-1.5 px-3 py-1.5 min-h-[36px] rounded-xl bg-slate-800 hover:bg-slate-700 text-amber-400 border border-slate-700 text-xs font-bold transition active:scale-95 whitespace-nowrap shrink-0"
                 title="Przetestuj okienko nowej akcji meczowej (3-sekundowe samoznikające okno widza)"
               >
-                <Sparkles className="w-3.5 h-3.5 text-amber-400" />
+                <Sparkles className="w-3.5 h-3.5 text-amber-400 shrink-0" />
                 <span>Podgląd okienka akcji</span>
               </button>
               <button
+                type="button"
                 onClick={() => setShowPlayByPlay(true)}
-                className="flex items-center gap-1.5 px-2.5 py-1 rounded-xl bg-slate-800 hover:bg-slate-700 text-sky-400 border border-slate-700 text-xs font-bold transition active:scale-95 shadow-sm"
+                className="flex items-center gap-1.5 px-3 py-1.5 min-h-[36px] rounded-xl bg-slate-800 hover:bg-slate-700 text-sky-400 border border-slate-700 text-xs font-bold transition active:scale-95 whitespace-nowrap shrink-0"
                 title="Otwórz oficjalny protokół meczu w oknie z opcją pobrania PDF"
               >
-                <FileText className="w-3.5 h-3.5" />
+                <FileText className="w-3.5 h-3.5 shrink-0" />
                 <span>Otwórz protokół PDF</span>
               </button>
             </div>
           </div>
+        </div>
+      )}
 
-          {/* Spectator Sub-Tabs */}
-          <div className="flex items-center gap-2 border-b border-slate-800 pb-2">
-            <button
-              onClick={() => setSpectatorTab('boxscore')}
-              className={`flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-bold transition ${
-                spectatorTab === 'boxscore'
-                  ? 'bg-amber-500 text-slate-950 shadow-md shadow-amber-950/40'
-                  : 'bg-slate-900 text-slate-400 hover:text-white hover:bg-slate-800'
-              }`}
-            >
-              <BarChart3 className="w-4 h-4" />
-              <span>Statystyki Zawodników (Box Score & Eval)</span>
-            </button>
+      {/* 1. Scoreboard (Quarter, Clock, Official Headline Score, Opponent & Team Adjustments) */}
+      <ScoreBoard
+        match={match}
+        clubProfile={clubProfile}
+        onUpdateMatch={onUpdateMatch}
+        onRecordAction={handleRecordAction}
+        onToggleSound={onToggleSound}
+        soundEnabled={soundEnabled}
+        readOnly={readOnly}
+        liveTheme={liveTheme}
+        onOpenBoxScore={() => setShowBoxScore(true)}
+        onOpenPlayByPlay={() => setShowPlayByPlay(true)}
+        onFinishMatch={onFinishMatch}
+        statsMode={statsMode}
+        onToggleStatsMode={toggleStatsMode}
+        layoutMode={isTablet ? 'tablet' : 'mobile'}
+        viewMode={viewMode}
+        onSelectViewMode={handleSelectViewMode}
+      />
 
+      {/* READ-ONLY SPECTATOR VIEW (Directly below ScoreBoard) */}
+      {readOnly ? (
+        <div className="flex-1 flex flex-col px-3 sm:px-5 pt-2 pb-4 max-w-5xl mx-auto w-full space-y-3">
+          {/* Spectator Sub-Tabs (Protokół meczowy default & first) */}
+          <div className="flex items-center gap-2 border-b border-slate-800 pb-2 overflow-x-auto scrollbar-none">
             <button
-              onClick={() => setSpectatorTab('plays')}
-              className={`flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-bold transition ${
+              type="button"
+              onClick={() => {
+                playClickSound();
+                setSpectatorTab('plays');
+              }}
+              className={`flex items-center gap-1.5 px-3.5 py-2 min-h-[40px] rounded-xl text-xs font-bold transition whitespace-nowrap shrink-0 ${
                 spectatorTab === 'plays'
                   ? 'bg-amber-500 text-slate-950 shadow-md shadow-amber-950/40'
                   : 'bg-slate-900 text-slate-400 hover:text-white hover:bg-slate-800'
               }`}
             >
-              <ListOrdered className="w-4 h-4" />
-              <span>📋 Protokół meczowy na żywo ({match.events.length})</span>
+              <ListOrdered className="w-4 h-4 shrink-0" />
+              <span>Protokół meczowy na żywo ({match.events.length})</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => {
+                playClickSound();
+                setSpectatorTab('boxscore');
+              }}
+              className={`flex items-center gap-1.5 px-3.5 py-2 min-h-[40px] rounded-xl text-xs font-bold transition whitespace-nowrap shrink-0 ${
+                spectatorTab === 'boxscore'
+                  ? 'bg-amber-500 text-slate-950 shadow-md shadow-amber-950/40'
+                  : 'bg-slate-900 text-slate-400 hover:text-white hover:bg-slate-800'
+              }`}
+            >
+              <BarChart3 className="w-4 h-4 shrink-0" />
+              <span>Statystyki Zawodników (Box Score & Eval)</span>
             </button>
           </div>
 
-          {/* Tab 1: Live Box Score Table */}
-          {spectatorTab === 'boxscore' && (
-            <div className="bg-slate-900/60 rounded-2xl border border-slate-800 p-3 sm:p-4 shadow-xl">
-              <BoxScoreTable
-                match={match}
-                rosterPlayers={rosterPlayers}
-                isMatchActive={true}
-                clubProfile={clubProfile}
-              />
-            </div>
-          )}
-
-          {/* Tab 2: Live Play-by-Play Match Protocol */}
+          {/* Tab 1 (Default): Live Play-by-Play Match Protocol directly under Scoreboard */}
           {spectatorTab === 'plays' && (
             <LivePlayByPlayStream
               match={match}
               clubProfile={clubProfile}
-              rosterPlayers={rosterPlayers}
+              rosterPlayers={rosterPlayers.length > 0 ? rosterPlayers : players}
               readOnly={true}
             />
+          )}
+
+          {/* Tab 2: Live Box Score Table */}
+          {spectatorTab === 'boxscore' && (
+            <div className="bg-slate-900/60 rounded-2xl border border-slate-800 p-3 sm:p-4 shadow-xl">
+              <BoxScoreTable
+                match={match}
+                rosterPlayers={rosterPlayers.length > 0 ? rosterPlayers : players}
+                isMatchActive={true}
+                clubProfile={clubProfile}
+              />
+            </div>
           )}
         </div>
       ) : (
