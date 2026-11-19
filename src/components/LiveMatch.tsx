@@ -8,11 +8,12 @@ import { BoxScoreTable } from './BoxScoreTable';
 import { PlayByPlayModal } from './PlayByPlayModal';
 import { calculatePlayerStats, getEventPoints, recalculateMatchScores } from '../services/statsCalculator';
 import { announcePlay, triggerHaptic, playClickSound, playScoreSound } from '../services/tts';
-import { BarChart3, ListOrdered, CheckCircle2, Sparkles, FileText } from 'lucide-react';
+import { BarChart3, ListOrdered, CheckCircle2, Sparkles, FileText, UserCheck } from 'lucide-react';
 import { VoiceStatsAssistant } from './VoiceStatsAssistant';
 import { ParsedVoiceAction } from '../services/voiceRecognitionService';
 import { LivePlayByPlayStream } from './LivePlayByPlayStream';
 import { LiveSpectatorActionPopup } from './LiveSpectatorActionPopup';
+import { SpectatorPlayerTracker } from './SpectatorPlayerTracker';
 import { LiveMatchTheme } from '../types/liveMatchTheme';
 import { getStoredLiveMatchTheme, THEME_CHANGE_EVENT } from '../services/liveMatchThemeService';
 
@@ -71,7 +72,8 @@ export const LiveMatch: React.FC<LiveMatchProps> = ({
   const [isSubModalOpen, setIsSubModalOpen] = useState(false);
   const [showBoxScore, setShowBoxScore] = useState(false);
   const [showPlayByPlay, setShowPlayByPlay] = useState(false);
-  const [spectatorTab, setSpectatorTab] = useState<'plays' | 'boxscore'>('plays');
+  const [spectatorTab, setSpectatorTab] = useState<'plays' | 'boxscore' | 'player-tracker'>('plays');
+  const [trackedPlayerId, setTrackedPlayerId] = useState<string | null>(null);
 
   // Spectator mode: 3-second self-dismissing large popup on new match action
   const [liveActionPopupEvent, setLiveActionPopupEvent] = useState<MatchEvent | null>(null);
@@ -531,6 +533,22 @@ export const LiveMatch: React.FC<LiveMatchProps> = ({
               <BarChart3 className="w-4 h-4 shrink-0" />
               <span>Statystyki Zawodników (Box Score & Eval)</span>
             </button>
+
+            <button
+              type="button"
+              onClick={() => {
+                playClickSound();
+                setSpectatorTab('player-tracker');
+              }}
+              className={`flex items-center gap-1.5 px-3.5 py-2 min-h-[40px] rounded-xl text-xs font-bold transition whitespace-nowrap shrink-0 ${
+                spectatorTab === 'player-tracker'
+                  ? 'bg-amber-500 text-slate-950 shadow-md shadow-amber-950/40'
+                  : 'bg-slate-900 text-slate-400 hover:text-white hover:bg-slate-800'
+              }`}
+            >
+              <UserCheck className="w-4 h-4 shrink-0" />
+              <span>Śledzenie zawodnika</span>
+            </button>
           </div>
 
           {/* Tab 1 (Default): Live Play-by-Play Match Protocol directly under Scoreboard */}
@@ -553,6 +571,16 @@ export const LiveMatch: React.FC<LiveMatchProps> = ({
                 clubProfile={clubProfile}
               />
             </div>
+          )}
+
+          {/* Tab 3: Compact Single-Player Tracker directly under Scoreboard */}
+          {spectatorTab === 'player-tracker' && (
+            <SpectatorPlayerTracker
+              match={match}
+              players={rosterPlayers.length > 0 ? rosterPlayers : players}
+              selectedPlayerId={trackedPlayerId}
+              onSelectPlayer={setTrackedPlayerId}
+            />
           )}
         </div>
       ) : (
