@@ -1,6 +1,102 @@
 import { ActionType, Match, MatchEvent, Player, PlayerMatchStats, TeamMatchStats, QuarterScores, PlayerCareerAverages } from '../types/basketball';
 import { getPlayerFullName } from './playerDisplay';
 
+export function formatSecondsToMMSS(totalSeconds: number): string {
+  const safe = Math.max(0, Math.floor(totalSeconds || 0));
+  const mins = Math.floor(safe / 60);
+  const secs = safe % 60;
+  return `${String(mins).padStart(2, '0')}:${String(secs).padStart(2, '0')}`;
+}
+
+function estimatePlayerSecondsFromEvents(
+  playerId: string,
+  events: MatchEvent[],
+  matchObj: Match
+): number {
+  if (!events || events.length === 0) return 0;
+
+  const eventsByQuarter = new Map<number, MatchEvent[]>();
+  for (const ev of events) {
+    const q = ev.quarter || 1;
+    const list = eventsByQuarter.get(q);
+    if (list) list.push(ev);
+    else eventsByQuarter.set(q, [ev]);
+  }
+
+  let totalSeconds = 0;
+  let lastKnownLineup: string[] = [];
+
+  const sortedQuarters = Array.from(eventsByQuarter.keys()).sort((a, b) => a - b);
+  for (const q of sortedQuarters) {
+    const qEvents = eventsByQuarter.get(q) || [];
+    const qStartClock = (q >= 5 ? 5 : matchObj.quarterMinutes || 8) * 60;
+    let prevClock = qStartClock;
+
+    const firstWithCourt = qEvents.find(
+      (ev) => Array.isArray(ev.onCourtPlayerIds) && ev.onCourtPlayerIds.length > 0
+    );
+    let currentLineup: string[] = [];
+    if (firstWithCourt && firstWithCourt.onCourtPlayerIds) {
+      currentLineup = [...firstWithCourt.onCourtPlayerIds];
+      if (firstWithCourt === qEvents[0]) {
+        if (
+          firstWithCourt.type === 'SUBSTITUTION' &&
+          firstWithCourt.playerId &&
+          firstWithCourt.subOutPlayerId
+        ) {
+          currentLineup = currentLineup.map((id) =>
+            id === firstWithCourt.playerId ? firstWithCourt.subOutPlayerId! : id
+          );
+        } else if (firstWithCourt.type === 'SUB_IN' && firstWithCourt.playerId) {
+          currentLineup = currentLineup.filter((id) => id !== firstWithCourt.playerId);
+        } else if (
+          firstWithCourt.type === 'SUB_OUT' &&
+          firstWithCourt.playerId &&
+          !currentLineup.includes(firstWithCourt.playerId)
+        ) {
+          currentLineup = [...currentLineup, firstWithCourt.playerId];
+        }
+      }
+    } else if (lastKnownLineup.length > 0) {
+      currentLineup = [...lastKnownLineup];
+    }
+
+    for (const ev of qEvents) {
+      const evClock = typeof ev.clockSeconds === 'number' ? ev.clockSeconds : prevClock;
+      if (evClock < prevClock) {
+        const delta = prevClock - evClock;
+        if (currentLineup.includes(playerId)) {
+          totalSeconds += delta;
+        }
+        prevClock = evClock;
+      }
+      if (Array.isArray(ev.onCourtPlayerIds) && ev.onCourtPlayerIds.length > 0) {
+        currentLineup = [...ev.onCourtPlayerIds];
+      }
+    }
+
+    if (prevClock < qStartClock && currentLineup.includes(playerId)) {
+      let endClock = 0;
+      if (q === matchObj.currentQuarter) {
+        endClock = Math.max(0, Math.min(prevClock, matchObj.clockSeconds ?? prevClock));
+      } else if (q < matchObj.currentQuarter || matchObj.status === 'finished') {
+        endClock = 0;
+      } else {
+        endClock = prevClock;
+      }
+      if (endClock < prevClock) {
+        totalSeconds += prevClock - endClock;
+      }
+    }
+
+    if (currentLineup.length > 0) {
+      lastKnownLineup = currentLineup;
+    }
+  }
+
+  return Math.max(0, Math.floor(totalSeconds));
+}
+
 export function calculatePlayerStats(
   player: Player,
   events: MatchEvent[],
@@ -120,6 +216,16 @@ export function calculatePlayerStats(
   const missedFt = fta - ftm;
   const evalScore = pts + totReb + ast + stl + blk - (missedFg + missedFt + tov);
 
+  let secondsPlayed = 0;
+  if (matchOrOnCourtIds && !Array.isArray(matchOrOnCourtIds) && typeof matchOrOnCourtIds === 'object') {
+    const matchObj = matchOrOnCourtIds as Match;
+    if (matchObj.playerSecondsPlayed && Object.keys(matchObj.playerSecondsPlayed).length > 0) {
+      secondsPlayed = Math.max(0, Math.floor(matchObj.playerSecondsPlayed[player.id] || 0));
+    } else {
+      secondsPlayed = estimatePlayerSecondsFromEvents(player.id, events, matchObj);
+    }
+  }
+
   return {
     playerId: player.id,
     playerNumber: player.number,
@@ -147,6 +253,7 @@ export function calculatePlayerStats(
     tov,
     fouls,
     eval: evalScore,
+    secondsPlayed,
   };
 }
 
@@ -174,6 +281,7 @@ export function calculateTeamStats(playerStats: PlayerMatchStats[]): TeamMatchSt
     tov: 0,
     fouls: 0,
     eval: 0,
+    secondsPlayed: 0,
   };
 
   for (const s of playerStats) {
@@ -195,6 +303,7 @@ export function calculateTeamStats(playerStats: PlayerMatchStats[]): TeamMatchSt
     totals.tov += s.tov;
     totals.fouls += s.fouls;
     totals.eval += s.eval;
+    totals.secondsPlayed += s.secondsPlayed || 0;
   }
 
   totals.fg2Pct = totals.fg2a > 0 ? Math.round((totals.fg2m / totals.fg2a) * 100) : 0;
@@ -323,13 +432,17 @@ export function calculateSeasonAverages(
       let totalFta = 0;
       let totalEval = 0;
       let highScore = 0;
+      let totalSecondsPlayed = 0;
 
       for (const m of matches) {
         // Did player participate?
         const isRostered = m.rosterPlayerIds?.includes(player.id);
-        const hasEvents = m.events.some((e) => e.playerId === player.id);
+        const hasEvents = m.events.some(
+          (e) => e.playerId === player.id || e.subOutPlayerId === player.id
+        );
+        const hasSeconds = (m.playerSecondsPlayed?.[player.id] || 0) > 0;
 
-        if (isRostered || hasEvents) {
+        if (isRostered || hasEvents || hasSeconds) {
           gamesPlayed++;
           const pStats = calculatePlayerStats(player, m.events, m);
           totalPts += pStats.pts;
@@ -343,6 +456,7 @@ export function calculateSeasonAverages(
           totalFtm += pStats.ftm;
           totalFta += pStats.fta;
           totalEval += pStats.eval;
+          totalSecondsPlayed += pStats.secondsPlayed;
           if (pStats.pts > highScore) highScore = pStats.pts;
         }
       }
@@ -356,6 +470,7 @@ export function calculateSeasonAverages(
       const evalAvg = gamesPlayed > 0 ? Number((totalEval / gamesPlayed).toFixed(1)) : 0;
       const fgPct = totalFga > 0 ? Math.round((totalFgm / totalFga) * 100) : 0;
       const ftPct = totalFta > 0 ? Math.round((totalFtm / totalFta) * 100) : 0;
+      const mpg = gamesPlayed > 0 ? Number((totalSecondsPlayed / gamesPlayed / 60).toFixed(1)) : 0;
 
       return {
         playerId: player.id,
@@ -378,6 +493,8 @@ export function calculateSeasonAverages(
         ftPct,
         evalAvg,
         highScore,
+        totalSecondsPlayed,
+        mpg,
       };
     })
     .sort((a, b) => b.ppg - a.ppg || b.totalPts - a.totalPts);

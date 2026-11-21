@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { ClubProfile, Match, Player, PlayerMatchStats } from '../types/basketball';
-import { calculatePlayerStats, calculateTeamStats } from '../services/statsCalculator';
+import { calculatePlayerStats, calculateTeamStats, formatSecondsToMMSS } from '../services/statsCalculator';
 import { exportMatchBoxScoreCsv } from '../services/exportCsv';
 import { exportMatchPdf, exportBoxScorePdf } from '../services/exportPdf';
 import {
@@ -47,6 +47,7 @@ type SortKey =
   | 'blk'
   | 'tov'
   | 'fouls'
+  | 'secondsPlayed'
   | 'playerNumber'
   | 'playerName';
 
@@ -491,6 +492,18 @@ export const BoxScoreTable: React.FC<BoxScoreTableProps> = ({
           </button>
 
           <button
+            onClick={() => handleSort('secondsPlayed')}
+            className={`px-2.5 py-1 rounded-lg text-xs font-bold transition ${
+              sortKey === 'secondsPlayed'
+                ? 'bg-sky-400 text-slate-950 shadow-md'
+                : 'bg-slate-800 text-slate-300 hover:bg-slate-700'
+            }`}
+            title="Sortuj po czasie przebywania na parkiecie (MIN)"
+          >
+            ⏱️ Czas (MIN) {sortKey === 'secondsPlayed' && (sortAsc ? '▲' : '▼')}
+          </button>
+
+          <button
             onClick={() => handleSort('playerNumber')}
             className={`px-2.5 py-1 rounded-lg text-xs font-bold transition ${
               sortKey === 'playerNumber'
@@ -525,6 +538,15 @@ export const BoxScoreTable: React.FC<BoxScoreTableProps> = ({
                 title="Sortuj alfabetycznie po nazwisku"
               >
                 Zawodnik {renderSortIndicator('playerName')}
+              </th>
+              <th
+                onClick={() => handleSort('secondsPlayed')}
+                className={`py-2.5 px-2 text-center font-bold cursor-pointer transition hover:bg-slate-800 ${
+                  sortKey === 'secondsPlayed' ? 'text-sky-300 bg-sky-500/20' : 'text-sky-300'
+                }`}
+                title="Czas przebywania zawodnika na parkiecie (MM:SS)"
+              >
+                MIN {renderSortIndicator('secondsPlayed')}
               </th>
               <th
                 onClick={() => handleSort('pts')}
@@ -711,6 +733,13 @@ export const BoxScoreTable: React.FC<BoxScoreTableProps> = ({
                 <td className="py-2.5 px-3 font-bold text-amber-400">#{s.playerNumber}</td>
                 <td className="py-2.5 px-3 font-sans font-semibold text-slate-200">{s.playerName}</td>
                 <td
+                  className={`py-2.5 px-2 text-center font-semibold tabular-nums ${
+                    sortKey === 'secondsPlayed' ? 'text-sky-200 bg-sky-500/15' : 'text-sky-300'
+                  }`}
+                >
+                  {formatSecondsToMMSS(s.secondsPlayed)}
+                </td>
+                <td
                   className={`py-2.5 px-2 text-center font-black ${
                     sortKey === 'pts' ? 'text-amber-200 bg-amber-500/15' : 'text-amber-300 bg-amber-500/5'
                   }`}
@@ -785,6 +814,9 @@ export const BoxScoreTable: React.FC<BoxScoreTableProps> = ({
               <td className="py-2.5 px-3 text-amber-400">-</td>
               <td className="py-2.5 px-3 font-sans font-black tracking-wider text-amber-400">
                 RAZEM DRUŻYNA
+              </td>
+              <td className="py-2.5 px-2 text-center font-bold text-sky-300 tabular-nums">
+                {formatSecondsToMMSS(teamTotals.secondsPlayed)}
               </td>
               <td className="py-2.5 px-2 text-center font-black text-amber-300 bg-amber-500/10 text-sm">
                 {teamTotals.pts}

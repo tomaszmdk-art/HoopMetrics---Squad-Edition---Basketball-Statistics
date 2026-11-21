@@ -1,6 +1,6 @@
 import React, { useState, useMemo } from 'react';
 import { ClubProfile, Match, Player, TeamCategory, DEFAULT_SEASONS, getMatchSeason } from '../types/basketball';
-import { calculateSeasonAverages } from '../services/statsCalculator';
+import { calculateSeasonAverages, formatSecondsToMMSS } from '../services/statsCalculator';
 import { exportSeasonStatsCsv, exportMatchBoxScoreCsv } from '../services/exportCsv';
 import { exportMatchPdf, exportSeasonStatsPdf } from '../services/exportPdf';
 import { BoxScoreTable } from './BoxScoreTable';
@@ -159,7 +159,9 @@ export const MatchHistory: React.FC<MatchHistoryProps> = ({
     | 'fgPct'
     | 'ftPct'
     | 'evalAvg'
-    | 'highScore';
+    | 'highScore'
+    | 'mpg'
+    | 'totalSecondsPlayed';
 
   const [seasonSortKey, setSeasonSortKey] = useState<SeasonSortKey>('evalAvg');
   const [seasonSortAsc, setSeasonSortAsc] = useState<boolean>(false);
@@ -823,6 +825,17 @@ export const MatchHistory: React.FC<MatchHistoryProps> = ({
               </button>
 
               <button
+                onClick={() => handleSeasonSort('mpg')}
+                className={`px-2.5 py-1 rounded-lg text-xs font-bold transition ${
+                  seasonSortKey === 'mpg'
+                    ? 'bg-sky-400 text-slate-950 shadow-md'
+                    : 'bg-slate-800 text-slate-300 hover:bg-slate-700'
+                }`}
+              >
+                ⏱️ Śr. Czas (MIN) {seasonSortKey === 'mpg' && (seasonSortAsc ? '▲' : '▼')}
+              </button>
+
+              <button
                 onClick={() => handleSeasonSort('highScore')}
                 className={`px-2.5 py-1 rounded-lg text-xs font-bold transition ${
                   seasonSortKey === 'highScore'
@@ -867,6 +880,20 @@ export const MatchHistory: React.FC<MatchHistoryProps> = ({
                     className="py-2.5 px-2 text-center cursor-pointer hover:bg-slate-800 transition"
                   >
                     Mecze {seasonSortKey === 'gamesPlayed' && (seasonSortAsc ? '▲' : '▼')}
+                  </th>
+                  <th
+                    onClick={() => handleSeasonSort('mpg')}
+                    className={`py-2.5 px-2 text-center font-bold cursor-pointer hover:bg-sky-500/20 transition ${
+                      seasonSortKey === 'mpg' ? 'text-sky-300 bg-sky-500/20' : 'text-sky-300'
+                    }`}
+                  >
+                    Śr. MIN {seasonSortKey === 'mpg' && (seasonSortAsc ? '▲' : '▼')}
+                  </th>
+                  <th
+                    onClick={() => handleSeasonSort('totalSecondsPlayed')}
+                    className="py-2.5 px-2 text-center cursor-pointer hover:bg-slate-800 transition"
+                  >
+                    Suma MIN {seasonSortKey === 'totalSecondsPlayed' && (seasonSortAsc ? '▲' : '▼')}
                   </th>
                   <th
                     onClick={() => handleSeasonSort('ppg')}
@@ -953,11 +980,15 @@ export const MatchHistory: React.FC<MatchHistoryProps> = ({
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-800/60 font-mono">
-                {sortedSeasonAverages.map((p) => (
+                {sortedSeasonAverages.map((p) => {
+                  const avgSec = p.gamesPlayed > 0 ? Math.round(p.totalSecondsPlayed / p.gamesPlayed) : 0;
+                  return (
                   <tr key={p.playerId} className="hover:bg-slate-900/60 transition">
                     <td className="py-2.5 px-3 font-bold text-amber-400">#{p.playerNumber}</td>
                     <td className="py-2.5 px-3 font-sans font-semibold text-slate-200">{p.playerName}</td>
                     <td className="py-2.5 px-2 text-center text-slate-300">{p.gamesPlayed}</td>
+                    <td className="py-2.5 px-2 text-center font-bold text-sky-300">{formatSecondsToMMSS(avgSec)}</td>
+                    <td className="py-2.5 px-2 text-center text-slate-400">{formatSecondsToMMSS(p.totalSecondsPlayed)}</td>
                     <td className="py-2.5 px-2 text-center font-black text-amber-300 bg-amber-500/5">{p.ppg}</td>
                     <td className="py-2.5 px-2 text-center text-slate-400">{p.totalPts}</td>
                     <td className="py-2.5 px-2 text-center font-bold text-blue-300">{p.rpg}</td>
@@ -971,7 +1002,8 @@ export const MatchHistory: React.FC<MatchHistoryProps> = ({
                     <td className="py-2.5 px-2 text-center font-black text-emerald-400 bg-emerald-500/5">{p.evalAvg}</td>
                     <td className="py-2.5 px-3 text-center font-bold text-amber-400">{p.highScore} pkt</td>
                   </tr>
-                ))}
+                  );
+                })}
               </tbody>
             </table>
           </div>
@@ -1040,6 +1072,7 @@ export const MatchHistory: React.FC<MatchHistoryProps> = ({
 
               {/* Stat rows with comparison bars */}
               {[
+                { label: 'Średni czas na parkiecie (MPG)', val1: player1Stats.mpg, val2: player2Stats.mpg, unit: 'min' },
                 { label: 'Średnia punktów (PPG)', val1: player1Stats.ppg, val2: player2Stats.ppg, unit: 'pkt' },
                 { label: 'Średnia zbiórek (RPG)', val1: player1Stats.rpg, val2: player2Stats.rpg, unit: 'zb' },
                 { label: 'Średnia asyst (APG)', val1: player1Stats.apg, val2: player2Stats.apg, unit: 'ast' },

@@ -1,6 +1,6 @@
 import React from 'react';
 import { Player, Match } from '../types/basketball';
-import { calculatePlayerStats } from '../services/statsCalculator';
+import { calculatePlayerStats, formatSecondsToMMSS } from '../services/statsCalculator';
 import { X, Trophy, Flame, Target, Shield, Award, Calendar } from 'lucide-react';
 import { playClickSound, triggerHaptic } from '../services/tts';
 import { getPlayerFullName } from '../services/playerDisplay';
@@ -44,6 +44,7 @@ export const PlayerProfileModal: React.FC<PlayerProfileModalProps> = ({
   const totalSteals = playerGameLogs.reduce((acc, g) => acc + g.stats.stl, 0);
   const totalBlocks = playerGameLogs.reduce((acc, g) => acc + g.stats.blk, 0);
   const totalEval = playerGameLogs.reduce((acc, g) => acc + g.stats.eval, 0);
+  const totalSecondsPlayed = playerGameLogs.reduce((acc, g) => acc + g.stats.secondsPlayed, 0);
   const highScore = playerGameLogs.reduce((max, g) => Math.max(max, g.stats.pts), 0);
 
   const ppg = gamesPlayed > 0 ? (totalPoints / gamesPlayed).toFixed(1) : '0.0';
@@ -51,6 +52,7 @@ export const PlayerProfileModal: React.FC<PlayerProfileModalProps> = ({
   const rpg = gamesPlayed > 0 ? (totalRebounds / gamesPlayed).toFixed(1) : '0.0';
   const apg = gamesPlayed > 0 ? (totalAssists / gamesPlayed).toFixed(1) : '0.0';
   const evalAvg = gamesPlayed > 0 ? (totalEval / gamesPlayed).toFixed(1) : '0.0';
+  const avgSecondsPerGame = gamesPlayed > 0 ? Math.round(totalSecondsPlayed / gamesPlayed) : 0;
 
   const totalFgm = playerGameLogs.reduce((acc, g) => acc + g.stats.fgm, 0);
   const totalFga = playerGameLogs.reduce((acc, g) => acc + g.stats.fga, 0);
@@ -162,7 +164,14 @@ export const PlayerProfileModal: React.FC<PlayerProfileModalProps> = ({
               <Target className="w-3.5 h-3.5 text-amber-400" />
               <span>Skuteczność i elementy gry</span>
             </h3>
-            <div className="grid grid-cols-2 sm:grid-cols-5 gap-3 text-xs">
+            <div className="grid grid-cols-2 sm:grid-cols-6 gap-3 text-xs">
+              <div>
+                <span className="text-slate-400">Czas na boisku / m:</span>
+                <div className="font-bold text-sky-300 mt-0.5 font-mono">
+                  {formatSecondsToMMSS(avgSecondsPerGame)}{' '}
+                  <span className="text-[10px] text-slate-500">({formatSecondsToMMSS(totalSecondsPlayed)})</span>
+                </div>
+              </div>
               <div>
                 <span className="text-slate-400">Rzuty z gry:</span>
                 <div className="font-bold text-white mt-0.5">
@@ -213,6 +222,7 @@ export const PlayerProfileModal: React.FC<PlayerProfileModalProps> = ({
                   <thead className="bg-slate-950 text-[10px] uppercase font-bold text-slate-400 border-b border-slate-800">
                     <tr>
                       <th className="py-2.5 px-3">Mecz / Rywal</th>
+                      <th className="py-2.5 px-2 text-center text-sky-400 font-bold">MIN</th>
                       <th className="py-2.5 px-2 text-center text-amber-400 font-bold">PTS</th>
                       <th className="py-2.5 px-2 text-center text-slate-300 font-bold">+/-</th>
                       <th className="py-2.5 px-2 text-center text-emerald-400 font-bold">EVAL</th>
@@ -231,6 +241,9 @@ export const PlayerProfileModal: React.FC<PlayerProfileModalProps> = ({
                             vs {match.opponent}
                           </div>
                           <div className="text-[10px] text-slate-400 font-mono">{match.date}</div>
+                        </td>
+                        <td className="py-2.5 px-2 text-center font-semibold text-sky-300">
+                          {formatSecondsToMMSS(stats.secondsPlayed)}
                         </td>
                         <td className="py-2.5 px-2 text-center font-black text-amber-300 text-sm">
                           {stats.pts}

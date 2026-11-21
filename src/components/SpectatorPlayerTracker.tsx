@@ -1,9 +1,9 @@
 import React, { useMemo, useState } from 'react';
 import { Match, Player } from '../types/basketball';
-import { calculatePlayerStats } from '../services/statsCalculator';
+import { calculatePlayerStats, formatSecondsToMMSS } from '../services/statsCalculator';
 import { getPlayerFullName } from '../services/playerDisplay';
 import { playClickSound, triggerHaptic } from '../services/tts';
-import { UserCheck, ArrowLeftRight } from 'lucide-react';
+import { UserCheck, ArrowLeftRight, Clock } from 'lucide-react';
 
 interface SpectatorPlayerTrackerProps {
   match: Match;
@@ -157,28 +157,38 @@ export const SpectatorPlayerTracker: React.FC<SpectatorPlayerTrackerProps> = ({
             <div className="text-sm sm:text-base font-black text-white truncate leading-tight">
               {formatDisplayName(trackedPlayer)}
             </div>
-            <div className="text-xs sm:text-sm text-slate-400 truncate leading-tight mt-0.5">
+            <div className="text-xs sm:text-sm text-slate-400 truncate leading-tight mt-0.5 flex items-center gap-1.5 flex-wrap">
               <span className={isOnCourt ? 'text-emerald-400 font-semibold' : 'text-slate-400'}>
                 {isOnCourt ? 'Na parkiecie' : 'Na ławce'}
               </span>
-              {trackedPlayer.position ? ` · ${trackedPlayer.position}` : ''}
-              {` · Faule: ${stats.fouls}/5`}
+              {trackedPlayer.position ? <span>· {trackedPlayer.position}</span> : null}
+              <span>· Faule: {stats.fouls}/5</span>
             </div>
           </div>
         </div>
 
-        <button
-          type="button"
-          onClick={() => {
-            playClickSound();
-            setShowPicker(true);
-          }}
-          className="flex items-center gap-1.5 px-3 py-1.5 min-h-[36px] rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 text-xs sm:text-sm font-bold transition active:scale-95 whitespace-nowrap shrink-0"
-          title="Wybierz innego zawodnika do śledzenia"
-        >
-          <ArrowLeftRight className="w-3.5 h-3.5 text-amber-400 shrink-0" />
-          <span>Zmień</span>
-        </button>
+        <div className="flex items-center gap-2 shrink-0">
+          <div
+            className="flex items-center gap-1.5 px-2.5 py-1.5 min-h-[36px] rounded-xl bg-slate-950 border border-slate-800 text-sky-300 font-mono tabular-nums font-black text-sm sm:text-base"
+            title="Czas przebywania zawodnika na parkiecie"
+          >
+            <Clock className="w-3.5 h-3.5 text-sky-400 shrink-0" />
+            <span>{formatSecondsToMMSS(stats.secondsPlayed)}</span>
+          </div>
+
+          <button
+            type="button"
+            onClick={() => {
+              playClickSound();
+              setShowPicker(true);
+            }}
+            className="flex items-center gap-1.5 px-3 py-1.5 min-h-[36px] rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 text-xs sm:text-sm font-bold transition active:scale-95 whitespace-nowrap shrink-0"
+            title="Wybierz innego zawodnika do śledzenia"
+          >
+            <ArrowLeftRight className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+            <span>Zmień</span>
+          </button>
+        </div>
       </div>
 
       {/* Headline Metrics Row: PKT / EVAL / +/- */}

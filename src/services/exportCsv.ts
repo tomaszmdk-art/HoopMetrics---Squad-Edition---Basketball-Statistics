@@ -1,5 +1,5 @@
 import { Match, Player, PlayerCareerAverages, PlayerMatchStats, TeamMatchStats } from '../types/basketball';
-import { calculatePlayerStats, calculateTeamStats } from './statsCalculator';
+import { calculatePlayerStats, calculateTeamStats, formatSecondsToMMSS } from './statsCalculator';
 import { getClubProfileSync } from './db';
 import { resolveEventPlayerLabel, resolveSubstitutionLabels } from './playerDisplay';
 
@@ -50,7 +50,7 @@ export function exportMatchBoxScoreCsv(
 
   // Table Columns
   lines.push(
-    'Nr;Zawodnik;PTS;+/-;2PT Cel;2PT Prób;2PT %;3PT Cel;3PT Prób;3PT %;FG Cel;FG Prób;FG %;FT Cel;FT Prób;FT %;ZB Of;ZB Def;ZB Suma;AST;PRZ;BLK;STR;FAULE;EVAL'
+    'Nr;Zawodnik;MIN;PTS;+/-;2PT Cel;2PT Prób;2PT %;3PT Cel;3PT Prób;3PT %;FG Cel;FG Prób;FG %;FT Cel;FT Prób;FT %;ZB Of;ZB Def;ZB Suma;AST;PRZ;BLK;STR;FAULE;EVAL'
   );
 
   for (const s of playerStatsList) {
@@ -58,6 +58,7 @@ export function exportMatchBoxScoreCsv(
       [
         s.playerNumber,
         `"${includePersonalData ? s.playerName : `Zawodnik #${s.playerNumber}`}"`,
+        formatSecondsToMMSS(s.secondsPlayed),
         s.pts,
         s.plusMinus > 0 ? `+${s.plusMinus}` : s.plusMinus,
         s.fg2m,
@@ -90,6 +91,7 @@ export function exportMatchBoxScoreCsv(
     [
       '-',
       '"RAZEM DRUŻYNA"',
+      formatSecondsToMMSS(teamTotals.secondsPlayed),
       teamTotals.pts,
       teamDiff > 0 ? `+${teamDiff}` : teamDiff,
       teamTotals.fg2m,
@@ -226,15 +228,18 @@ export function exportSeasonStatsCsv(
   lines.push(`Liczba rozegranych meczów;${matchesCount}`);
   lines.push('');
   lines.push(
-    'Nr;Zawodnik;Mecze;Suma PTS;PPG (Śr. Pkt);Suma ZB;RPG (Śr. Zb);Suma AST;APG (Śr. Ast);Suma PRZ;SPG;Suma BLK;BPG;FG %;FT %;Śr. EVAL;Rekord Meczowy'
+    'Nr;Zawodnik;Mecze;Śr. Czas (MIN);Suma Czasu (MIN);Suma PTS;PPG (Śr. Pkt);Suma ZB;RPG (Śr. Zb);Suma AST;APG (Śr. Ast);Suma PRZ;SPG;Suma BLK;BPG;FG %;FT %;Śr. EVAL;Rekord Meczowy'
   );
 
   for (const p of seasonAverages) {
+    const avgSec = p.gamesPlayed > 0 ? Math.round(p.totalSecondsPlayed / p.gamesPlayed) : 0;
     lines.push(
       [
         p.playerNumber,
         `"${includePersonalData ? p.playerName : `Zawodnik #${p.playerNumber}`}"`,
         p.gamesPlayed,
+        formatSecondsToMMSS(avgSec),
+        formatSecondsToMMSS(p.totalSecondsPlayed),
         p.totalPts,
         p.ppg,
         p.totalReb,

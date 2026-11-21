@@ -135,6 +135,7 @@ export interface PlayerMatchStats {
   tov: number;
   fouls: number;
   eval: number; // FIBA evaluation
+  secondsPlayed: number; // czas przebywania na parkiecie (w sekundach)
 }
 
 export interface PlayerCareerAverages {
@@ -158,6 +159,8 @@ export interface PlayerCareerAverages {
   ftPct: number;
   evalAvg: number;
   highScore: number;
+  totalSecondsPlayed: number;
+  mpg: number; // średnia minut na mecz
 }
 
 export interface TeamMatchStats {
@@ -183,6 +186,7 @@ export interface TeamMatchStats {
   tov: number;
   fouls: number;
   eval: number;
+  secondsPlayed: number;
 }
 
 export interface QuarterScores {
@@ -204,6 +208,7 @@ export interface Match {
   status: 'live' | 'finished';
   rosterPlayerIds: string[]; // selected players
   onCourtPlayerIds: string[]; // 5 on court
+  playerSecondsPlayed?: Record<string, number>; // playerId -> total seconds played on court
   currentQuarter: number; // 1, 2, 3, 4, 5 (OT)
   clockSeconds: number; // current countdown seconds in current quarter
   isClockRunning: boolean;

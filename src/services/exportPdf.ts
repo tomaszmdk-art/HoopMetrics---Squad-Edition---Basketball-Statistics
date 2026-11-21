@@ -9,7 +9,7 @@ import {
   PlayerCareerAverages,
   PlayerMatchStats,
 } from '../types/basketball';
-import { calculatePlayerStats, calculateTeamStats } from './statsCalculator';
+import { calculatePlayerStats, calculateTeamStats, formatSecondsToMMSS } from './statsCalculator';
 import { getClubProfile } from './db';
 import {
   getPlayerFullName,
@@ -239,6 +239,7 @@ export async function exportMatchPdf(
     const headers = [
       'Nr',
       'Zawodnik',
+      'MIN',
       'PTS',
       '+/-',
       '2PT (C/P)',
@@ -263,6 +264,7 @@ export async function exportMatchPdf(
     const bodyRows = playerStatsList.map((s) => [
       `#${s.playerNumber}`,
       allowPii ? s.playerName : `Zawodnik #${s.playerNumber}`,
+      formatSecondsToMMSS(s.secondsPlayed),
       s.pts,
       s.plusMinus > 0 ? `+${s.plusMinus}` : `${s.plusMinus}`,
       `${s.fg2m}/${s.fg2a}`,
@@ -289,6 +291,7 @@ export async function exportMatchPdf(
     const totalsRow = [
       '-',
       'RAZEM DRUŻYNA',
+      formatSecondsToMMSS(teamTotals.secondsPlayed),
       teamTotals.pts,
       teamDiff > 0 ? `+${teamDiff}` : `${teamDiff}`,
       `${teamTotals.fg2m}/${teamTotals.fg2a}`,
@@ -317,8 +320,8 @@ export async function exportMatchPdf(
       theme: 'grid',
       styles: {
         font: fontName,
-        fontSize: 7.2,
-        cellPadding: 1.3,
+        fontSize: 6.9,
+        cellPadding: 1.1,
         textColor: [15, 23, 42],
         lineColor: [203, 213, 225],
         lineWidth: 0.1,
@@ -330,14 +333,14 @@ export async function exportMatchPdf(
         fillColor: [15, 23, 42],
         textColor: [255, 255, 255],
         halign: 'center',
-        fontSize: 7.2,
+        fontSize: 6.9,
       },
       columnStyles: {
         0: { halign: 'center', fontStyle: 'bold', cellWidth: 9 },
-        1: { halign: 'left', fontStyle: 'bold', cellWidth: 33 },
-        2: { halign: 'center', fontStyle: 'bold', textColor: [180, 83, 9] }, // PTS
-        3: { halign: 'center', fontStyle: 'bold' }, // +/-
-        4: { halign: 'center' },
+        1: { halign: 'left', fontStyle: 'bold', cellWidth: 29 },
+        2: { halign: 'center', fontStyle: 'bold', textColor: [2, 132, 199], cellWidth: 12 }, // MIN
+        3: { halign: 'center', fontStyle: 'bold', textColor: [180, 83, 9] }, // PTS
+        4: { halign: 'center', fontStyle: 'bold' }, // +/-
         5: { halign: 'center' },
         6: { halign: 'center' },
         7: { halign: 'center' },
@@ -347,20 +350,21 @@ export async function exportMatchPdf(
         11: { halign: 'center' },
         12: { halign: 'center' },
         13: { halign: 'center' },
-        14: { halign: 'center', fontStyle: 'bold', textColor: [37, 99, 235] }, // ZB
-        15: { halign: 'center', fontStyle: 'bold', textColor: [2, 132, 199] }, // AST
-        16: { halign: 'center' },
+        14: { halign: 'center' },
+        15: { halign: 'center', fontStyle: 'bold', textColor: [37, 99, 235] }, // ZB
+        16: { halign: 'center', fontStyle: 'bold', textColor: [2, 132, 199] }, // AST
         17: { halign: 'center' },
-        18: { halign: 'center', textColor: [217, 119, 6] },
-        19: { halign: 'center', textColor: [225, 29, 72] },
-        20: { halign: 'center', fontStyle: 'bold', textColor: [5, 150, 105] }, // EVAL
+        18: { halign: 'center' },
+        19: { halign: 'center', textColor: [217, 119, 6] },
+        20: { halign: 'center', textColor: [225, 29, 72] },
+        21: { halign: 'center', fontStyle: 'bold', textColor: [5, 150, 105] }, // EVAL
       },
       didParseCell: (data) => {
         // Highlight totals row
         if (data.row.index === bodyRows.length) {
           data.cell.styles.fontStyle = 'bold';
           data.cell.styles.fillColor = [241, 245, 249];
-        } else if (data.section === 'body' && data.column.index === 3) {
+        } else if (data.section === 'body' && data.column.index === 4) {
           const raw = String(data.cell.raw || '');
           if (raw.startsWith('+')) {
             data.cell.styles.textColor = [5, 150, 105]; // Emerald
@@ -667,22 +671,23 @@ export async function exportMatchPdf(
 
       // Summary Box at bottom of left card
       doc.setFillColor(241, 245, 249);
-      doc.roundedRect(20, 150, 60, 42, 2, 2, 'F');
+      doc.roundedRect(20, 147, 60, 48, 2, 2, 'F');
 
       doc.setFont(fontName, 'bold');
       doc.setFontSize(7.5);
       doc.setTextColor(15, 23, 42);
-      doc.text('WPŁYW NA WYNIK MECZU:', 23, 156);
+      doc.text('WPŁYW NA WYNIK MECZU:', 23, 152.5);
 
       doc.setFont(fontName, 'normal');
       doc.setFontSize(7);
       doc.setTextColor(71, 85, 105);
       const teamPoints = teamTotals.pts || match.ourScore;
       const sharePct = teamPoints > 0 ? Math.round((pStats.pts / teamPoints) * 100) : 0;
-      doc.text(`• Udział w punktach: ${sharePct}% zespołu`, 23, 162);
-      doc.text(`• Bilans na parkiecie (+/-): ${pStats.plusMinus > 0 ? `+${pStats.plusMinus}` : pStats.plusMinus} pkt`, 23, 168);
-      doc.text(`• Skuteczność z gry: ${pStats.fgPct}% (${pStats.fgm}/${pStats.fga})`, 23, 174);
-      doc.text(`• Akcje w meczu: ${pEvents.length} zarejestrowanych`, 23, 180);
+      doc.text(`• Czas na parkiecie: ${formatSecondsToMMSS(pStats.secondsPlayed)}`, 23, 158.5);
+      doc.text(`• Udział w punktach: ${sharePct}% zespołu`, 23, 164);
+      doc.text(`• Bilans na parkiecie (+/-): ${pStats.plusMinus > 0 ? `+${pStats.plusMinus}` : pStats.plusMinus} pkt`, 23, 169.5);
+      doc.text(`• Skuteczność z gry: ${pStats.fgPct}% (${pStats.fgm}/${pStats.fga})`, 23, 175);
+      doc.text(`• Akcje w meczu: ${pEvents.length} zarejestrowanych`, 23, 180.5);
       const evalRating = pStats.eval >= 15 ? 'MVP / Bardzo wysoka' : pStats.eval >= 8 ? 'Wysoka / Solidna' : pStats.eval >= 0 ? 'Pozytywna' : 'Wymaga poprawy';
       doc.text(`• Ocena efektywności: ${evalRating}`, 23, 186);
 
@@ -932,10 +937,10 @@ export async function exportMatchPdf(
           doc.roundedRect(14, 25, pageWidth - 28, 9, 2, 2, 'FD');
 
           doc.setFont(fontName, 'bold');
-          doc.setFontSize(7);
+          doc.setFontSize(6.6);
           doc.setTextColor(71, 85, 105);
           doc.text(
-            `PODSUMOWANIE GRACZA:  PTS: ${pStats.pts} (${pStats.fgm}/${pStats.fga} FG, ${pStats.ftm}/${pStats.fta} FT)  •  +/-: ${pStats.plusMinus > 0 ? `+${pStats.plusMinus}` : pStats.plusMinus}  •  EVAL: ${pStats.eval}  •  ZBIÓRKI: ${pStats.totReb} (${pStats.offReb} atak / ${pStats.defReb} obrona)  •  ASYSTY: ${pStats.ast}  •  PRZECHWYTY: ${pStats.stl}  •  BLOKI: ${pStats.blk}  •  FAULE: ${pStats.fouls}/5  •  STRATY: ${pStats.tov}`,
+            `PODSUMOWANIE GRACZA:  CZAS: ${formatSecondsToMMSS(pStats.secondsPlayed)}  •  PTS: ${pStats.pts} (${pStats.fgm}/${pStats.fga} FG, ${pStats.ftm}/${pStats.fta} FT)  •  +/-: ${pStats.plusMinus > 0 ? `+${pStats.plusMinus}` : pStats.plusMinus}  •  EVAL: ${pStats.eval}  •  ZB: ${pStats.totReb} (${pStats.offReb}A/${pStats.defReb}O)  •  AST: ${pStats.ast}  •  PRZ: ${pStats.stl}  •  BLK: ${pStats.blk}  •  FAULE: ${pStats.fouls}/5  •  STR: ${pStats.tov}`,
             18,
             31
           );
@@ -1128,6 +1133,8 @@ export async function exportSeasonStatsPdf(
     'Nr',
     'Zawodnik',
     'Mecze',
+    'Śr. MIN',
+    'Suma MIN',
     'PPG',
     'Suma PTS',
     'RPG',
@@ -1142,23 +1149,28 @@ export async function exportSeasonStatsPdf(
     'Rekord',
   ];
 
-  const rows = seasonAverages.map((p) => [
-    `#${p.playerNumber}`,
-    allowPii ? p.playerName : `Zawodnik #${p.playerNumber}`,
-    p.gamesPlayed,
-    p.ppg,
-    p.totalPts,
-    p.rpg,
-    p.totalReb,
-    p.apg,
-    p.totalAst,
-    p.spg,
-    p.bpg,
-    `${p.fgPct}%`,
-    `${p.ftPct}%`,
-    p.evalAvg,
-    `${p.highScore} pkt`,
-  ]);
+  const rows = seasonAverages.map((p) => {
+    const avgSec = p.gamesPlayed > 0 ? Math.round(p.totalSecondsPlayed / p.gamesPlayed) : 0;
+    return [
+      `#${p.playerNumber}`,
+      allowPii ? p.playerName : `Zawodnik #${p.playerNumber}`,
+      p.gamesPlayed,
+      formatSecondsToMMSS(avgSec),
+      formatSecondsToMMSS(p.totalSecondsPlayed),
+      p.ppg,
+      p.totalPts,
+      p.rpg,
+      p.totalReb,
+      p.apg,
+      p.totalAst,
+      p.spg,
+      p.bpg,
+      `${p.fgPct}%`,
+      `${p.ftPct}%`,
+      p.evalAvg,
+      `${p.highScore} pkt`,
+    ];
+  });
 
   autoTable(doc, {
     startY: 34,
@@ -1167,8 +1179,8 @@ export async function exportSeasonStatsPdf(
     theme: 'grid',
     styles: {
       font: fontName,
-      fontSize: 7.5,
-      cellPadding: 1.5,
+      fontSize: 7.2,
+      cellPadding: 1.3,
       textColor: [15, 23, 42],
       lineColor: [203, 213, 225],
       lineWidth: 0.1,
@@ -1180,24 +1192,26 @@ export async function exportSeasonStatsPdf(
       fillColor: [15, 23, 42],
       textColor: [255, 255, 255],
       halign: 'center',
-      fontSize: 7.5,
+      fontSize: 7.2,
     },
     columnStyles: {
-      0: { halign: 'center', fontStyle: 'bold', cellWidth: 12 },
-      1: { halign: 'left', fontStyle: 'bold', cellWidth: 42 },
+      0: { halign: 'center', fontStyle: 'bold', cellWidth: 11 },
+      1: { halign: 'left', fontStyle: 'bold', cellWidth: 38 },
       2: { halign: 'center' },
-      3: { halign: 'center', fontStyle: 'bold', textColor: [180, 83, 9] },
-      4: { halign: 'center' },
-      5: { halign: 'center', textColor: [37, 99, 235] },
+      3: { halign: 'center', fontStyle: 'bold', textColor: [2, 132, 199] },
+      4: { halign: 'center', textColor: [71, 85, 105] },
+      5: { halign: 'center', fontStyle: 'bold', textColor: [180, 83, 9] },
       6: { halign: 'center' },
-      7: { halign: 'center', textColor: [2, 132, 199] },
+      7: { halign: 'center', textColor: [37, 99, 235] },
       8: { halign: 'center' },
-      9: { halign: 'center' },
+      9: { halign: 'center', textColor: [2, 132, 199] },
       10: { halign: 'center' },
       11: { halign: 'center' },
       12: { halign: 'center' },
-      13: { halign: 'center', fontStyle: 'bold', textColor: [5, 150, 105] },
-      14: { halign: 'center', fontStyle: 'bold', textColor: [180, 83, 9] },
+      13: { halign: 'center' },
+      14: { halign: 'center' },
+      15: { halign: 'center', fontStyle: 'bold', textColor: [5, 150, 105] },
+      16: { halign: 'center', fontStyle: 'bold', textColor: [180, 83, 9] },
     },
     margin: { left: 14, right: 14, bottom: 14 },
   });

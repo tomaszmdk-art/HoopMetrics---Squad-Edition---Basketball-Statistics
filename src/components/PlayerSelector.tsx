@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { Player, Match } from '../types/basketball';
-import { calculatePlayerStats } from '../services/statsCalculator';
+import { calculatePlayerStats, formatSecondsToMMSS } from '../services/statsCalculator';
 import {
   Users,
   ArrowLeftRight,
@@ -386,6 +386,9 @@ export const PlayerSelector: React.FC<PlayerSelectorProps> = ({
                     >
                       +/- {s.plusMinus > 0 ? `+${s.plusMinus}` : s.plusMinus}
                     </span>
+                    <span className="bg-slate-950 text-sky-300 px-1.5 py-0.5 rounded font-mono text-[11px] font-black" title="Czas na parkiecie">
+                      {formatSecondsToMMSS(s.secondsPlayed)}
+                    </span>
                     <span className="bg-slate-950 text-emerald-400 px-1.5 py-0.5 rounded font-mono text-[11px] font-black">
                       Eval: {s.eval}
                     </span>
@@ -503,15 +506,23 @@ export const PlayerSelector: React.FC<PlayerSelectorProps> = ({
                     {getCardPrimaryName(player)}
                   </span>
                 </div>
-                {getCardSecondaryName(player) && (
-                  <div
-                    className={`text-[10px] sm:text-[11px] font-semibold truncate leading-none mt-1 ${
-                      isSelected ? 'text-slate-900/80 font-bold' : 'text-slate-400'
+                <div
+                  className={`text-[10px] sm:text-[11px] font-semibold truncate leading-none mt-1 flex items-center gap-1.5 ${
+                    isSelected ? 'text-slate-900/80 font-bold' : 'text-slate-400'
+                  }`}
+                >
+                  <span
+                    className={`font-mono font-bold shrink-0 ${
+                      isSelected ? 'text-slate-950' : 'text-sky-300'
                     }`}
+                    title="Czas przebywania na parkiecie"
                   >
-                    {getCardSecondaryName(player)}
-                  </div>
-                )}
+                    {formatSecondsToMMSS(stats.secondsPlayed)}
+                  </span>
+                  {getCardSecondaryName(player) && (
+                    <span className="truncate">• {getCardSecondaryName(player)}</span>
+                  )}
+                </div>
               </div>
 
               {/* 3. PRAWA CZĘŚĆ: PUNKTY, +/-, EVAL I FAULE */}
@@ -630,7 +641,10 @@ export const PlayerSelector: React.FC<PlayerSelectorProps> = ({
                 {(player.lastName?.trim() || player.firstName?.trim()) && (
                   <span className="truncate max-w-[70px]">{getPlayerShortName(player)}</span>
                 )}
-                <span className="text-[9px] text-slate-400 font-mono">({stats.pts}p)</span>
+                <span className={`text-[9px] font-mono font-bold ${isSelected ? 'text-slate-900' : 'text-sky-300'}`}>
+                  {formatSecondsToMMSS(stats.secondsPlayed)}
+                </span>
+                <span className={`text-[9px] font-mono ${isSelected ? 'text-slate-900' : 'text-slate-400'}`}>({stats.pts}p)</span>
                 <span
                   className={`text-[9px] font-mono font-black px-1 rounded ${
                     isSelected
@@ -861,6 +875,7 @@ export const PlayerSelector: React.FC<PlayerSelectorProps> = ({
                             )}
 
                             <div className="flex items-center justify-center gap-1.5 text-[10px] font-mono mt-1 pt-1 border-t border-slate-800/80">
+                              <span className="text-sky-300 font-bold">{formatSecondsToMMSS(stats.secondsPlayed)}</span>
                               <span className="text-amber-300 font-bold">{stats.pts}p</span>
                               <span
                                 className={`font-black ${
@@ -942,6 +957,7 @@ export const PlayerSelector: React.FC<PlayerSelectorProps> = ({
                                   {getCardSecondaryName(player) && (
                                     <span>{getCardSecondaryName(player)}</span>
                                   )}
+                                  <span className="text-sky-300 font-mono font-bold">{formatSecondsToMMSS(stats.secondsPlayed)}</span>
                                   <span className="text-amber-300 font-mono font-bold">({stats.pts}p</span>
                                   <span
                                     className={`font-mono font-bold ${
@@ -1050,7 +1066,7 @@ export const PlayerSelector: React.FC<PlayerSelectorProps> = ({
                             </div>
                             <div className="text-[10px] text-slate-400 mt-0.5">
                               {getCardSecondaryName(player) ? `${getCardSecondaryName(player)} • ` : ''}
-                              {stats.pts}p • +/- {stats.plusMinus > 0 ? `+${stats.plusMinus}` : stats.plusMinus} • Eval {stats.eval}
+                              <span className="text-sky-300 font-mono font-bold">{formatSecondsToMMSS(stats.secondsPlayed)}</span> • {stats.pts}p • +/- {stats.plusMinus > 0 ? `+${stats.plusMinus}` : stats.plusMinus} • Eval {stats.eval}
                             </div>
                           </div>
 

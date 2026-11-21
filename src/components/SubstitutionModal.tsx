@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { Player, Match } from '../types/basketball';
-import { calculatePlayerStats } from '../services/statsCalculator';
+import { calculatePlayerStats, formatSecondsToMMSS } from '../services/statsCalculator';
 import {
   Users,
   ArrowLeftRight,
@@ -397,7 +397,7 @@ export const SubstitutionModal: React.FC<SubstitutionModalProps> = ({
                             #{player.number}
                           </span>
                           <span className="text-[10px] font-mono text-slate-400">
-                            {stats.pts}p | {stats.fouls}F
+                            <span className="text-sky-300">{formatSecondsToMMSS(stats.secondsPlayed)}</span> • {stats.pts}p | {stats.fouls}F
                           </span>
                         </div>
                         <div className="font-bold text-xs text-white truncate mt-1">
@@ -449,7 +449,7 @@ export const SubstitutionModal: React.FC<SubstitutionModalProps> = ({
                               #{player.number}
                             </span>
                             <span className="text-[10px] font-mono text-slate-400">
-                              {stats.pts}p | {stats.fouls}F
+                              <span className="text-sky-300">{formatSecondsToMMSS(stats.secondsPlayed)}</span> • {stats.pts}p | {stats.fouls}F
                             </span>
                           </div>
                           <div className="font-bold text-xs text-slate-200 truncate mt-1">
@@ -539,8 +539,10 @@ export const SubstitutionModal: React.FC<SubstitutionModalProps> = ({
                         <div className="truncate text-xs">{getCardPrimaryName(player)}</div>
                       </div>
                       <div className="text-right font-mono text-[11px]">
-                        <div>{stats.pts} pkt</div>
-                        <div>{stats.fouls}F</div>
+                        <div className={isOnCourt ? 'text-slate-900 font-bold' : 'text-sky-300'}>
+                          {formatSecondsToMMSS(stats.secondsPlayed)}
+                        </div>
+                        <div>{stats.pts} pkt | {stats.fouls}F</div>
                       </div>
                     </button>
                   );

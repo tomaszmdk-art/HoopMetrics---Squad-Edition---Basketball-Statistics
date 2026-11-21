@@ -116,6 +116,7 @@ export const NewMatchModal: React.FC<NewMatchModalProps> = ({
       status: 'live',
       rosterPlayerIds: selectedPlayerIds,
       onCourtPlayerIds: starters,
+      playerSecondsPlayed: {},
       currentQuarter: 1,
       clockSeconds: quarterMinutes * 60,
       isClockRunning: false,

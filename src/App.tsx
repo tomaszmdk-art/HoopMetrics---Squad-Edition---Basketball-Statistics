@@ -72,7 +72,10 @@ import { playClickSound, triggerHaptic } from './services/tts';
 
 function buildActiveMatchFingerprint(m: Match | undefined): string {
   if (!m) return 'none';
-  return `${m.id}:${m.updatedAt || 0}:${m.clockSeconds}:${m.isClockRunning}:${m.currentQuarter}:${m.ourScore}:${m.opponentScore}:${m.events?.length || 0}:${m.onCourtPlayerIds?.join(',') || ''}`;
+  const totalSec = m.playerSecondsPlayed
+    ? Object.values(m.playerSecondsPlayed).reduce((sum, s) => sum + (s || 0), 0)
+    : 0;
+  return `${m.id}:${m.updatedAt || 0}:${m.clockSeconds}:${m.isClockRunning}:${m.currentQuarter}:${m.ourScore}:${m.opponentScore}:${m.events?.length || 0}:${m.onCourtPlayerIds?.join(',') || ''}:${totalSec}`;
 }
 
 function buildPlayersFingerprint(list: Player[]): string {
