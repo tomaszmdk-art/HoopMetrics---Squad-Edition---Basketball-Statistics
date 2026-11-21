@@ -255,18 +255,29 @@ export const ScoreBoard: React.FC<ScoreBoardProps> = ({
       interval = setInterval(() => {
         onUpdateMatch((prev) => {
           if (!prev.isClockRunning) return prev;
+          const qKey = prev.currentQuarter || 1;
           const nextSecondsPlayed: Record<string, number> = {
             ...(prev.playerSecondsPlayed || {}),
           };
+          const nextQuarterSecondsPlayed: Record<number, Record<string, number>> = {
+            ...(prev.playerQuarterSecondsPlayed || {}),
+          };
+          const currentQMap: Record<string, number> = {
+            ...(nextQuarterSecondsPlayed[qKey] || {}),
+          };
+
           for (const pid of prev.onCourtPlayerIds || []) {
             nextSecondsPlayed[pid] = (nextSecondsPlayed[pid] || 0) + 1;
+            currentQMap[pid] = (currentQMap[pid] || 0) + 1;
           }
+          nextQuarterSecondsPlayed[qKey] = currentQMap;
 
           if (prev.clockSeconds > 1) {
             return {
               ...prev,
               clockSeconds: prev.clockSeconds - 1,
               playerSecondsPlayed: nextSecondsPlayed,
+              playerQuarterSecondsPlayed: nextQuarterSecondsPlayed,
             };
           } else {
             // Clock hit 0:00! Quarter completed!
@@ -302,6 +313,7 @@ export const ScoreBoard: React.FC<ScoreBoardProps> = ({
               currentQuarter: nextQ,
               clockSeconds: nextQ === 5 ? 5 * 60 : prev.quarterMinutes * 60,
               playerSecondsPlayed: nextSecondsPlayed,
+              playerQuarterSecondsPlayed: nextQuarterSecondsPlayed,
             };
           }
         });

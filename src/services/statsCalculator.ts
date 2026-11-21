@@ -8,22 +8,22 @@ export function formatSecondsToMMSS(totalSeconds: number): string {
   return `${String(mins).padStart(2, '0')}:${String(secs).padStart(2, '0')}`;
 }
 
-function estimatePlayerSecondsFromEvents(
+function estimatePlayerQuarterSecondsFromEvents(
   playerId: string,
   events: MatchEvent[],
   matchObj: Match
-): number {
-  if (!events || events.length === 0) return 0;
+): Record<number, number> {
+  const perQuarter: Record<number, number> = { 1: 0, 2: 0, 3: 0, 4: 0, 5: 0 };
+  if (!events || events.length === 0) return perQuarter;
 
   const eventsByQuarter = new Map<number, MatchEvent[]>();
   for (const ev of events) {
-    const q = ev.quarter || 1;
+    const q = Math.min(ev.quarter || 1, 5);
     const list = eventsByQuarter.get(q);
     if (list) list.push(ev);
     else eventsByQuarter.set(q, [ev]);
   }
 
-  let totalSeconds = 0;
   let lastKnownLineup: string[] = [];
 
   const sortedQuarters = Array.from(eventsByQuarter.keys()).sort((a, b) => a - b);
@@ -31,6 +31,7 @@ function estimatePlayerSecondsFromEvents(
     const qEvents = eventsByQuarter.get(q) || [];
     const qStartClock = (q >= 5 ? 5 : matchObj.quarterMinutes || 8) * 60;
     let prevClock = qStartClock;
+    let qSeconds = 0;
 
     const firstWithCourt = qEvents.find(
       (ev) => Array.isArray(ev.onCourtPlayerIds) && ev.onCourtPlayerIds.length > 0
@@ -66,7 +67,7 @@ function estimatePlayerSecondsFromEvents(
       if (evClock < prevClock) {
         const delta = prevClock - evClock;
         if (currentLineup.includes(playerId)) {
-          totalSeconds += delta;
+          qSeconds += delta;
         }
         prevClock = evClock;
       }
@@ -85,16 +86,56 @@ function estimatePlayerSecondsFromEvents(
         endClock = prevClock;
       }
       if (endClock < prevClock) {
-        totalSeconds += prevClock - endClock;
+        qSeconds += prevClock - endClock;
       }
     }
+
+    perQuarter[q] = Math.max(0, Math.floor(qSeconds));
 
     if (currentLineup.length > 0) {
       lastKnownLineup = currentLineup;
     }
   }
 
-  return Math.max(0, Math.floor(totalSeconds));
+  return perQuarter;
+}
+
+function estimatePlayerSecondsFromEvents(
+  playerId: string,
+  events: MatchEvent[],
+  matchObj: Match
+): number {
+  const byQuarter = estimatePlayerQuarterSecondsFromEvents(playerId, events, matchObj);
+  return Object.values(byQuarter).reduce((sum, s) => sum + s, 0);
+}
+
+export function calculatePlayerQuarterSeconds(
+  playerId: string,
+  events: MatchEvent[],
+  matchObj?: Match
+): Record<number, number> {
+  const result: Record<number, number> = { 1: 0, 2: 0, 3: 0, 4: 0, 5: 0 };
+  if (!matchObj) return result;
+
+  const recorded = matchObj.playerQuarterSecondsPlayed;
+  if (recorded && Object.keys(recorded).length > 0) {
+    for (const [qStr, playerMap] of Object.entries(recorded)) {
+      const qNum = Math.min(Math.max(1, Number(qStr) || 1), 5);
+      result[qNum] = (result[qNum] || 0) + Math.max(0, Math.floor(playerMap?.[playerId] || 0));
+    }
+    return result;
+  }
+
+  const estimated = estimatePlayerQuarterSecondsFromEvents(playerId, events, matchObj);
+  const estimatedTotal = Object.values(estimated).reduce((sum, s) => sum + s, 0);
+  const totalRecorded = Math.max(0, Math.floor(matchObj.playerSecondsPlayed?.[playerId] || 0));
+
+  if (estimatedTotal === 0 && totalRecorded > 0 && (matchObj.currentQuarter || 1) === 1) {
+    result[1] = totalRecorded;
+    return result;
+  }
+
+  return estimated;
 }
 
 export function calculatePlayerStats(

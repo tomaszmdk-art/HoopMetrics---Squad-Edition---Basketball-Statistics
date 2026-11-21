@@ -209,6 +209,7 @@ export interface Match {
   rosterPlayerIds: string[]; // selected players
   onCourtPlayerIds: string[]; // 5 on court
   playerSecondsPlayed?: Record<string, number>; // playerId -> total seconds played on court
+  playerQuarterSecondsPlayed?: Record<number, Record<string, number>>; // quarter (1..5) -> playerId -> seconds played
   currentQuarter: number; // 1, 2, 3, 4, 5 (OT)
   clockSeconds: number; // current countdown seconds in current quarter
   isClockRunning: boolean;

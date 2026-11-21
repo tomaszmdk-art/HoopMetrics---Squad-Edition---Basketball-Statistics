@@ -9,7 +9,7 @@ import {
   PlayerCareerAverages,
   PlayerMatchStats,
 } from '../types/basketball';
-import { calculatePlayerStats, calculateTeamStats, formatSecondsToMMSS } from './statsCalculator';
+import { calculatePlayerQuarterSeconds, calculatePlayerStats, calculateTeamStats, formatSecondsToMMSS } from './statsCalculator';
 import { getClubProfile } from './db';
 import {
   getPlayerFullName,
@@ -173,6 +173,7 @@ export async function exportMatchPdf(
   const topReb = [...playerStatsList].sort((a, b) => b.totReb - a.totReb)[0];
   const topAst = [...playerStatsList].sort((a, b) => b.ast - a.ast)[0];
   const topEval = playerStatsList[0];
+  const topMinutes = [...playerStatsList].sort((a, b) => b.secondsPlayed - a.secondsPlayed)[0];
 
   let currentY = 12;
 
@@ -387,13 +388,14 @@ export async function exportMatchPdf(
     doc.text('LIDERZY SPOTKANIA:', 14, currentY);
 
     doc.setFont(fontName, 'normal');
-    doc.setFontSize(8);
+    doc.setFontSize(7.6);
     const leaderLabel = (s?: PlayerMatchStats) =>
       s ? (allowPii ? s.playerName : `Zawodnik #${s.playerNumber}`) : '-';
-    const leadersText = `Punkty: ${topScorer ? `${leaderLabel(topScorer)} (${topScorer.pts} pkt)` : '-'}     |     Zbiórki: ${topReb ? `${leaderLabel(topReb)} (${topReb.totReb} zb)` : '-'}     |     Asysty: ${topAst ? `${leaderLabel(topAst)} (${topAst.ast} ast)` : '-'}     |     EVAL: ${topEval ? `${leaderLabel(topEval)} (${topEval.eval})` : '-'}`;
-    doc.text(leadersText, 55, currentY);
+    const leadersText = `Punkty: ${topScorer ? `${leaderLabel(topScorer)} (${topScorer.pts} pkt)` : '-'}   |   Zbiórki: ${topReb ? `${leaderLabel(topReb)} (${topReb.totReb} zb)` : '-'}   |   Asysty: ${topAst ? `${leaderLabel(topAst)} (${topAst.ast} ast)` : '-'}   |   EVAL: ${topEval ? `${leaderLabel(topEval)} (${topEval.eval})` : '-'}   |   Czas gry: ${topMinutes ? `${leaderLabel(topMinutes)} (${formatSecondsToMMSS(topMinutes.secondsPlayed)})` : '-'}`;
+    const splitLeaders = doc.splitTextToSize(leadersText, pageWidth - 69);
+    doc.text(splitLeaders, 55, currentY);
 
-    currentY += 5;
+    currentY += Math.max(5, splitLeaders.length * 4 + 1);
 
     // AI Coach Recap if available
     if (match.aiCoachRecap) {
@@ -694,17 +696,21 @@ export async function exportMatchPdf(
       // -------------------------------------------------------------
       // RIGHT COLUMN: Performance & Stats (x: 89, y: 25, w: 194)
       // -------------------------------------------------------------
-      // 1. Big Hero KPI Tiles (5 tiles in a row)
+      const qSeconds = calculatePlayerQuarterSeconds(player.id, match.events, match);
+      const activeQCount = [1, 2, 3, 4, 5].filter((q) => (qSeconds[q] || 0) > 0).length;
+
+      // 1. Big Hero KPI Tiles (6 tiles in a row)
       const kpis = [
         { label: 'PUNKTY (PTS)', val: `${pStats.pts}`, sub: `2P:${pStats.fg2m}/${pStats.fg2a} 3P:${pStats.fg3m}/${pStats.fg3a} FT:${pStats.ftm}/${pStats.fta}`, bg: [254, 243, 199], border: [245, 158, 11], text: [180, 83, 9] },
+        { label: 'CZAS GRY (MIN)', val: formatSecondsToMMSS(pStats.secondsPlayed), sub: activeQCount > 0 ? `W ${activeQCount} ${activeQCount === 1 ? 'kwarcie' : 'kwartach'}` : 'Na parkiecie', bg: [238, 242, 255], border: [99, 102, 241], text: [67, 56, 202] },
         { label: 'FIBA EVAL', val: `${pStats.eval}`, sub: `Bilans +/-: ${pStats.plusMinus > 0 ? `+${pStats.plusMinus}` : pStats.plusMinus}`, bg: [209, 250, 229], border: [16, 185, 129], text: [4, 120, 87] },
         { label: 'ZBIÓRKI (REB)', val: `${pStats.totReb}`, sub: `Atak: ${pStats.offReb} | Obrona: ${pStats.defReb}`, bg: [224, 242, 254], border: [14, 165, 233], text: [3, 105, 161] },
         { label: 'ASYSTY (AST)', val: `${pStats.ast}`, sub: 'Podania punktowe', bg: [243, 232, 255], border: [168, 85, 247], text: [126, 34, 206] },
         { label: 'OBRONA & FAULE', val: `${pStats.stl}S / ${pStats.blk}B`, sub: `Faule: ${pStats.fouls}/5 | Straty: ${pStats.tov}`, bg: [254, 226, 226], border: [239, 68, 68], text: [185, 28, 28] },
       ];
 
-      const kpiW = 36.8;
-      const kpiGap = 2.5;
+      const kpiGap = 2;
+      const kpiW = (194 - (kpis.length - 1) * kpiGap) / kpis.length;
       kpis.forEach((kpi, idx) => {
         const kX = 89 + idx * (kpiW + kpiGap);
         doc.setFillColor(kpi.bg[0], kpi.bg[1], kpi.bg[2]);
@@ -712,15 +718,15 @@ export async function exportMatchPdf(
         doc.roundedRect(kX, 25, kpiW, 22, 2, 2, 'FD');
 
         doc.setFont(fontName, 'bold');
-        doc.setFontSize(6.2);
+        doc.setFontSize(5.8);
         doc.setTextColor(kpi.text[0], kpi.text[1], kpi.text[2]);
         doc.text(kpi.label, kX + kpiW / 2, 30, { align: 'center' });
 
-        doc.setFontSize(12.5);
+        doc.setFontSize(11.8);
         doc.text(kpi.val, kX + kpiW / 2, 38.5, { align: 'center' });
 
         doc.setFont(fontName, 'normal');
-        doc.setFontSize(5.8);
+        doc.setFontSize(5.2);
         doc.setTextColor(71, 85, 105);
         doc.text(kpi.sub, kX + kpiW / 2, 44, { align: 'center' });
       });
@@ -777,33 +783,48 @@ export async function exportMatchPdf(
         }
       });
 
-      const qY = 99;
+      const qY = 98;
       doc.setFont(fontName, 'bold');
       doc.setFontSize(7.5);
       doc.setTextColor(15, 23, 42);
-      doc.text('ZDOBYCZ PUNKTOWA WG KWART:', 89, qY);
+      doc.text('ZDOBYCZ PUNKTOWA I CZAS GRY WG KWART:', 89, qY);
 
+      const qBoxGap = 2.5;
       const qBoxW = 36.8;
       const qNames = ['1. Kwarta (Q1)', '2. Kwarta (Q2)', '3. Kwarta (Q3)', '4. Kwarta (Q4)', 'Dogrywka (OT)'];
       [1, 2, 3, 4, 5].forEach((qNum, idx) => {
-        const qX = 89 + idx * (qBoxW + kpiGap);
+        const qX = 89 + idx * (qBoxW + qBoxGap);
         const pts = qScores[qNum] || 0;
-        doc.setFillColor(pts > 0 ? 254 : 248, pts > 0 ? 243 : 250, pts > 0 ? 199 : 252);
-        doc.setDrawColor(pts > 0 ? 245 : 226, pts > 0 ? 158 : 232, pts > 0 ? 11 : 240);
-        doc.roundedRect(qX, qY + 2, qBoxW, 11, 1.5, 1.5, 'FD');
+        const qSec = qSeconds[qNum] || 0;
+
+        if (pts > 0) {
+          doc.setFillColor(254, 243, 199);
+          doc.setDrawColor(245, 158, 11);
+        } else if (qSec > 0) {
+          doc.setFillColor(240, 249, 255);
+          doc.setDrawColor(14, 165, 233);
+        } else {
+          doc.setFillColor(248, 250, 252);
+          doc.setDrawColor(226, 232, 240);
+        }
+        doc.roundedRect(qX, qY + 1.5, qBoxW, 14.5, 1.5, 1.5, 'FD');
 
         doc.setFont(fontName, 'bold');
-        doc.setFontSize(6.2);
+        doc.setFontSize(6.0);
         doc.setTextColor(71, 85, 105);
-        doc.text(qNames[idx], qX + qBoxW / 2, qY + 6, { align: 'center' });
+        doc.text(qNames[idx], qX + qBoxW / 2, qY + 5.2, { align: 'center' });
 
         doc.setFontSize(8.5);
         doc.setTextColor(pts > 0 ? 180 : 148, pts > 0 ? 83 : 163, pts > 0 ? 9 : 184);
-        doc.text(`${pts} pkt`, qX + qBoxW / 2, qY + 10.5, { align: 'center' });
+        doc.text(`${pts} pkt`, qX + qBoxW / 2, qY + 9.6, { align: 'center' });
+
+        doc.setFontSize(6.4);
+        doc.setTextColor(qSec > 0 ? 3 : 148, qSec > 0 ? 105 : 163, qSec > 0 ? 161 : 184);
+        doc.text(`Czas: ${formatSecondsToMMSS(qSec)}`, qX + qBoxW / 2, qY + 13.8, { align: 'center' });
       });
 
       // 4. Chronological Play Log for this player in this match
-      const pbpTitleY = 117;
+      const pbpTitleY = 119;
       const totalPlayerEvents = pEvents.length;
       const MAX_PBP_PAGE_1 = 15;
       const hasContinuation = totalPlayerEvents > MAX_PBP_PAGE_1;
@@ -1319,7 +1340,7 @@ export async function exportChildMatchPdf(
     { label: 'PRZECHWYTY', value: `${record.stl}`, sub: 'Obrona na piłce', color: [236, 72, 153] },
     { label: 'BLOKI', value: `${record.blk}`, sub: 'Zablokowane rzuty', color: [20, 184, 166] },
     { label: '+/- RATING', value: record.plusMinus > 0 ? `+${record.plusMinus}` : `${record.plusMinus}`, sub: 'Bilans na parkiecie', color: [234, 179, 8] },
-    { label: 'CZAS GRY', value: `${minutesPlayed} min`, sub: `${record.fouls}/5 fauli • ${record.tov} strat`, color: [100, 116, 139] },
+    { label: 'CZAS GRY', value: formatSecondsToMMSS(record.secondsPlayed), sub: `${minutesPlayed} min • ${record.fouls}/5 fauli • ${record.tov} strat`, color: [100, 116, 139] },
   ];
 
   const colWidth = (pageWidth - 28 - 9) / 4; // 4 columns
