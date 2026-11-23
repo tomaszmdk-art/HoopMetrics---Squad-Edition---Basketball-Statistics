@@ -12,6 +12,9 @@ import {
   saveLiveMatchTheme,
   resetLiveMatchTheme,
   THEME_PRESETS,
+  DEFAULT_CLOCK_APPEARANCE,
+  getClockPulseDuration,
+  hexToRgba,
 } from '../services/liveMatchThemeService';
 import {
   X,
@@ -31,6 +34,8 @@ import {
   ArrowRight,
   Shield,
   Zap,
+  Play,
+  Pause,
 } from 'lucide-react';
 import { playClickSound, playScoreSound, triggerHaptic } from '../services/tts';
 
@@ -151,6 +156,15 @@ export const VirtualLiveMatchCustomizer: React.FC<VirtualLiveMatchCustomizerProp
   const [activeInspectorTab, setActiveInspectorTab] = useState<'size' | 'color' | 'font'>('color');
   const [saveToast, setSaveToast] = useState(false);
   const [previewTestMsg, setPreviewTestMsg] = useState<string | null>(null);
+  const [previewClockRunning, setPreviewClockRunning] = useState(false);
+
+  const updateScoreboard = (patch: Partial<LiveMatchTheme['scoreboard']>) => {
+    const updated = { ...theme.scoreboard, ...patch };
+    const nextTheme = { ...theme, scoreboard: updated };
+    setTheme(nextTheme);
+    saveLiveMatchTheme(nextTheme);
+    if (onApplyTheme) onApplyTheme(nextTheme);
+  };
 
   // Sync state when opened
   useEffect(() => {
@@ -425,27 +439,94 @@ export const VirtualLiveMatchCustomizer: React.FC<VirtualLiveMatchCustomizerProp
               </div>
 
               {/* Clock & Quarter */}
-              <div className="col-span-4 flex flex-col items-center justify-center border-x border-slate-800/80 px-2">
-                <span className="text-[10px] sm:text-xs font-bold uppercase tracking-wider text-amber-400/90 mb-1">
-                  Kwarta 3
-                </span>
-                <div
-                  style={{
-                    backgroundColor: theme.scoreboard.clockBg,
-                    color: theme.scoreboard.clockColor,
-                    fontSize: `${theme.scoreboard.clockFontSize}px`,
-                    fontFamily: getFontFamilyCss(theme.scoreboard.fontFamily),
-                  }}
-                  className="px-3 py-1 rounded-xl font-black font-mono leading-none border border-slate-800 shadow-inner select-none"
-                >
-                  06:42
-                </div>
-                <div className="mt-2 flex items-center gap-1">
-                  <span className="px-2 py-0.5 rounded-lg bg-emerald-500/20 border border-emerald-500/40 text-emerald-400 text-[10px] font-black">
-                    Zegar biegnie
-                  </span>
-                </div>
-              </div>
+              {(() => {
+                const sb = theme.scoreboard;
+                const activeColor = previewClockRunning
+                  ? sb.clockRunningColor || sb.clockColor || DEFAULT_CLOCK_APPEARANCE.clockRunningColor
+                  : sb.clockPausedColor || DEFAULT_CLOCK_APPEARANCE.clockPausedColor;
+                const activeTint = previewClockRunning
+                  ? sb.clockRunningBg || DEFAULT_CLOCK_APPEARANCE.clockRunningBg
+                  : sb.clockPausedBg || DEFAULT_CLOCK_APPEARANCE.clockPausedBg;
+                const intensity = (sb.clockBgIntensity ?? DEFAULT_CLOCK_APPEARANCE.clockBgIntensity) / 100;
+                const glowOn = sb.clockGlowEnabled ?? DEFAULT_CLOCK_APPEARANCE.clockGlowEnabled;
+                const pulseOn = previewClockRunning
+                  ? sb.clockRunningPulse ?? DEFAULT_CLOCK_APPEARANCE.clockRunningPulse
+                  : sb.clockPausedPulse ?? DEFAULT_CLOCK_APPEARANCE.clockPausedPulse;
+                const pulseDuration = getClockPulseDuration(sb.clockPulseSpeed);
+
+                return (
+                  <div className="col-span-4 flex flex-col items-center justify-center border-x border-slate-800/80 px-2">
+                    <span className="text-[10px] sm:text-xs font-bold uppercase tracking-wider text-amber-400/90 mb-1">
+                      Kwarta 3
+                    </span>
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setSelectedTarget({ type: 'scoreboard' });
+                        setPreviewClockRunning((prev) => !prev);
+                        playClickSound();
+                        triggerHaptic(20);
+                      }}
+                      title="Kliknij zegar, aby przetestować stan PAUZA / START"
+                      style={{
+                        backgroundColor: sb.clockBg,
+                        borderColor: hexToRgba(activeTint, Math.min(0.85, Math.max(0.28, intensity * 2.2))),
+                        boxShadow: glowOn
+                          ? `0 0 18px ${hexToRgba(activeTint, Math.min(0.45, intensity * 1.4))}`
+                          : undefined,
+                      }}
+                      className="relative overflow-hidden px-3 py-1.5 rounded-xl border transition-all cursor-pointer flex flex-col items-center justify-center min-w-[110px]"
+                    >
+                      <span
+                        aria-hidden="true"
+                        style={{
+                          background: `radial-gradient(circle at center, ${hexToRgba(activeTint, intensity * 1.25)} 0%, ${hexToRgba(activeTint, intensity * 0.5)} 70%, transparent 100%)`,
+                          animationDuration: pulseDuration,
+                        }}
+                        className={`pointer-events-none absolute inset-0 ${pulseOn ? 'animate-clock-bg-pulse' : ''}`}
+                      />
+                      <span
+                        style={{
+                          color: activeColor,
+                          fontSize: `${sb.clockFontSize}px`,
+                          fontFamily: getFontFamilyCss(sb.fontFamily),
+                          textShadow: glowOn
+                            ? `0 0 14px ${hexToRgba(activeColor, 0.55)}`
+                            : undefined,
+                          animationDuration: pulseDuration,
+                        }}
+                        className={`relative z-10 font-black font-mono leading-none select-none ${
+                          pulseOn ? 'animate-clock-pulse' : ''
+                        }`}
+                      >
+                        06:42
+                      </span>
+                      <span
+                        style={{
+                          color: activeColor,
+                          backgroundColor: hexToRgba(activeTint, Math.max(0.14, intensity * 0.9)),
+                          borderColor: hexToRgba(activeTint, Math.min(0.75, Math.max(0.3, intensity * 1.8))),
+                        }}
+                        className={`relative z-10 mt-1.5 inline-flex items-center gap-1 px-2 py-0.5 rounded-md border text-[9px] font-black tracking-wider ${
+                          previewClockRunning ? '' : 'uppercase'
+                        }`}
+                      >
+                        {previewClockRunning ? (
+                          <>
+                            <Play className="w-2.5 h-2.5 fill-current" /> Zegar idzie
+                          </>
+                        ) : (
+                          <>
+                            <Pause className="w-2.5 h-2.5 fill-current" /> PAUZA
+                          </>
+                        )}
+                      </span>
+                    </button>
+                    <span className="mt-1 text-[9px] text-slate-500">Kliknij zegar, aby przetestować</span>
+                  </div>
+                );
+              })()}
 
               {/* Opponent Team */}
               <div className="col-span-4 text-center">
@@ -513,73 +594,85 @@ export const VirtualLiveMatchCustomizer: React.FC<VirtualLiveMatchCustomizerProp
                       minHeight: `${cardStyle.cardMinHeight}px`,
                       fontFamily: getFontFamilyCss(cardStyle.fontFamily),
                     }}
-                    className={`flex items-center justify-between p-2 rounded-2xl border transition duration-150 shadow-md ${
+                    className={`flex flex-col justify-between gap-1.5 p-2 rounded-2xl border transition duration-150 shadow-md ${
                       cardStyle.borderRadius
                     } ${isSel ? 'ring-2 ring-amber-300/80 scale-[1.01]' : ''}`}
                   >
-                    {/* Left: Jersey Number */}
-                    <div
-                      style={{
-                        fontSize: `${cardStyle.numberFontSize}px`,
-                      }}
-                      className={`w-9 h-9 rounded-xl flex items-center justify-center font-mono font-black border mr-1.5 shrink-0 ${
-                        isSel ? 'bg-slate-950/30 text-slate-950 border-slate-950/30' : 'bg-slate-950 text-amber-400 border-amber-500/30'
-                      }`}
-                    >
-                      #{p.nr}
-                    </div>
-
-                    {/* Center: Name */}
-                    <div className="flex-1 min-w-0 text-left">
-                      <div
-                        style={{
-                          fontSize: `${cardStyle.nameFontSize}px`,
-                          color: isSel ? cardStyle.textSelected : cardStyle.textUnselected,
-                        }}
-                        className="font-black uppercase tracking-tight truncate leading-tight"
-                      >
-                        {p.name}
-                      </div>
-                      <div className="text-[10px] font-semibold opacity-75">Zawodnik UKS</div>
-                    </div>
-
-                    {/* Right: Points, +/-, Eval */}
-                    <div className="shrink-0 flex flex-col items-end gap-1 ml-1.5 font-mono">
-                      <div className="flex items-center gap-1">
-                        <span
+                    {/* Top: Avatar/Number, Name & Prominent Points on Right */}
+                    <div className="flex items-center justify-between gap-1.5 w-full min-w-0">
+                      <div className="flex items-center min-w-0 flex-1">
+                        <div
                           style={{
-                            fontSize: `${cardStyle.ptsFontSize}px`,
+                            fontSize: `${cardStyle.numberFontSize}px`,
                           }}
-                          className={`px-1.5 py-0.2 rounded font-black leading-none ${
-                            isSel ? 'bg-slate-950 text-amber-300' : 'bg-amber-500/20 text-amber-300 border border-amber-500/30'
+                          className={`w-9 h-9 rounded-xl flex items-center justify-center font-mono font-black border mr-1.5 shrink-0 ${
+                            isSel ? 'bg-slate-950/30 text-slate-950 border-slate-950/30' : 'bg-slate-950 text-amber-400 border-amber-500/30'
                           }`}
                         >
-                          {p.pts} <span className="text-[9px]">pkt</span>
-                        </span>
+                          #{p.nr}
+                        </div>
 
-                        <span
-                          style={{
-                            fontSize: `${cardStyle.plusMinusFontSize}px`,
-                          }}
-                          className="px-1 py-0.2 rounded font-black leading-none bg-emerald-500/20 text-emerald-300 border border-emerald-500/30"
-                        >
-                          +{p.pm}
-                        </span>
+                        <div className="flex-1 min-w-0 text-left">
+                          <div
+                            style={{
+                              fontSize: `${cardStyle.nameFontSize}px`,
+                              color: isSel ? cardStyle.textSelected : cardStyle.textUnselected,
+                            }}
+                            className="font-black uppercase tracking-tight truncate leading-tight"
+                          >
+                            {p.name}
+                          </div>
+                          <div className="text-[10px] font-semibold opacity-75">Zawodnik UKS</div>
+                        </div>
                       </div>
 
-                      <div className="flex items-center gap-1">
-                        <span
-                          style={{
-                            fontSize: `${cardStyle.evalFontSize}px`,
-                          }}
-                          className="px-1 py-0.2 rounded font-black leading-none bg-slate-950/40 text-slate-200"
-                        >
-                          E:{p.eval}
-                        </span>
-                        <span className="text-[9px] px-1 py-0.2 rounded bg-slate-800 text-slate-300 font-black">
-                          F:{p.fouls}
-                        </span>
-                      </div>
+                      <span
+                        style={{
+                          fontSize: `${Math.max(cardStyle.ptsFontSize, 24)}px`,
+                        }}
+                        className={`shrink-0 min-w-[34px] px-2 py-0.5 rounded-xl font-mono font-black leading-none flex items-center justify-center ${
+                          isSel ? 'bg-slate-950 text-amber-300' : 'bg-amber-500/20 text-amber-300 border border-amber-500/30'
+                        }`}
+                      >
+                        {p.pts}
+                      </span>
+                    </div>
+
+                    {/* Bottom: EVAL:, +-:, Faule: matching nameFontSize */}
+                    <div
+                      className={`w-full flex flex-wrap items-center justify-between gap-1 pt-1 border-t tabular-nums ${
+                        isSel ? 'border-slate-950/20' : 'border-slate-800/70'
+                      }`}
+                    >
+                      <span
+                        style={{ fontSize: `${cardStyle.nameFontSize}px` }}
+                        className={`px-1 py-0.5 rounded font-normal leading-none whitespace-nowrap ${
+                          isSel ? 'bg-slate-950/20 text-slate-950' : 'bg-slate-950/40 text-slate-200'
+                        }`}
+                      >
+                        <span>EVAL: </span>
+                        <span className="font-black">{p.eval}</span>
+                      </span>
+                      <span
+                        style={{ fontSize: `${cardStyle.nameFontSize}px` }}
+                        className={`px-1 py-0.5 rounded font-normal leading-none whitespace-nowrap ${
+                          p.pm > 0
+                            ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30'
+                            : 'bg-rose-500/20 text-rose-300 border border-rose-500/30'
+                        }`}
+                      >
+                        <span>+-: </span>
+                        <span className="font-black">{p.pm > 0 ? `+${p.pm}` : p.pm}</span>
+                      </span>
+                      <span
+                        style={{ fontSize: `${cardStyle.nameFontSize}px` }}
+                        className={`px-1 py-0.5 rounded font-normal leading-none whitespace-nowrap ${
+                          isSel ? 'bg-slate-950/20 text-slate-950' : 'bg-slate-800 text-slate-300'
+                        }`}
+                      >
+                        <span>Faule: </span>
+                        <span className="font-black">{p.fouls}</span>
+                      </span>
                     </div>
                   </div>
                 );
@@ -1251,20 +1344,195 @@ export const VirtualLiveMatchCustomizer: React.FC<VirtualLiveMatchCustomizerProp
                         </div>
                       </div>
 
-                      <div className="flex items-center justify-between pt-1 border-t border-slate-800/80">
-                        <span className="font-bold text-slate-300">Kolor cyfr zegara:</span>
-                        <div className="flex items-center gap-1.5">
-                          <input
-                            type="color"
-                            value={theme.scoreboard.clockColor}
-                            onChange={(e) => {
-                              const updated = { ...theme.scoreboard, clockColor: e.target.value };
-                              setTheme({ ...theme, scoreboard: updated });
-                              saveLiveMatchTheme({ ...theme, scoreboard: updated });
-                            }}
-                            className="w-7 h-7 rounded border border-slate-700 cursor-pointer bg-transparent"
-                          />
-                          <span className="font-mono text-[11px] text-slate-400">{theme.scoreboard.clockColor}</span>
+                      <div className="pt-2 border-t border-slate-800/80 space-y-2.5">
+                        <div className="flex items-center justify-between">
+                          <span className="font-bold text-slate-200">Zegar — PAUZA / START</span>
+                          <button
+                            type="button"
+                            onClick={() =>
+                              updateScoreboard({
+                                clockColor: DEFAULT_CLOCK_APPEARANCE.clockRunningColor,
+                                ...DEFAULT_CLOCK_APPEARANCE,
+                              })
+                            }
+                            className="text-[10px] font-bold text-slate-400 hover:text-amber-300 transition-colors"
+                          >
+                            Domyślne zegara
+                          </button>
+                        </div>
+
+                        {/* Paused state colors */}
+                        <div className="p-2.5 rounded-lg bg-rose-950/20 border border-rose-500/25 space-y-2">
+                          <div className="flex items-center justify-between">
+                            <span className="text-[11px] font-black uppercase tracking-wider text-rose-300">
+                              Stan PAUZA
+                            </span>
+                            <button
+                              type="button"
+                              onClick={() =>
+                                updateScoreboard({
+                                  clockPausedPulse: !(
+                                    theme.scoreboard.clockPausedPulse ?? DEFAULT_CLOCK_APPEARANCE.clockPausedPulse
+                                  ),
+                                })
+                              }
+                              className={`px-2 py-0.5 rounded text-[10px] font-bold border ${
+                                (theme.scoreboard.clockPausedPulse ?? DEFAULT_CLOCK_APPEARANCE.clockPausedPulse)
+                                  ? 'bg-rose-500/20 border-rose-400/50 text-rose-200'
+                                  : 'bg-slate-900 border-slate-700 text-slate-400'
+                              }`}
+                            >
+                              Pulsowanie:{' '}
+                              {(theme.scoreboard.clockPausedPulse ?? DEFAULT_CLOCK_APPEARANCE.clockPausedPulse)
+                                ? 'WŁ'
+                                : 'WYŁ'}
+                            </button>
+                          </div>
+                          <div className="grid grid-cols-2 gap-2">
+                            <div className="flex items-center justify-between bg-slate-950/70 px-2 py-1 rounded border border-slate-800">
+                              <span className="text-[11px] text-slate-300">Cyfry:</span>
+                              <input
+                                type="color"
+                                value={theme.scoreboard.clockPausedColor || DEFAULT_CLOCK_APPEARANCE.clockPausedColor}
+                                onChange={(e) => updateScoreboard({ clockPausedColor: e.target.value })}
+                                className="w-6 h-6 rounded border border-slate-700 cursor-pointer bg-transparent"
+                              />
+                            </div>
+                            <div className="flex items-center justify-between bg-slate-950/70 px-2 py-1 rounded border border-slate-800">
+                              <span className="text-[11px] text-slate-300">Tło:</span>
+                              <input
+                                type="color"
+                                value={theme.scoreboard.clockPausedBg || DEFAULT_CLOCK_APPEARANCE.clockPausedBg}
+                                onChange={(e) => updateScoreboard({ clockPausedBg: e.target.value })}
+                                className="w-6 h-6 rounded border border-slate-700 cursor-pointer bg-transparent"
+                              />
+                            </div>
+                          </div>
+                        </div>
+
+                        {/* Running state colors */}
+                        <div className="p-2.5 rounded-lg bg-emerald-950/20 border border-emerald-500/25 space-y-2">
+                          <div className="flex items-center justify-between">
+                            <span className="text-[11px] font-black uppercase tracking-wider text-emerald-300">
+                              Stan START
+                            </span>
+                            <button
+                              type="button"
+                              onClick={() =>
+                                updateScoreboard({
+                                  clockRunningPulse: !(
+                                    theme.scoreboard.clockRunningPulse ?? DEFAULT_CLOCK_APPEARANCE.clockRunningPulse
+                                  ),
+                                })
+                              }
+                              className={`px-2 py-0.5 rounded text-[10px] font-bold border ${
+                                (theme.scoreboard.clockRunningPulse ?? DEFAULT_CLOCK_APPEARANCE.clockRunningPulse)
+                                  ? 'bg-emerald-500/20 border-emerald-400/50 text-emerald-200'
+                                  : 'bg-slate-900 border-slate-700 text-slate-400'
+                              }`}
+                            >
+                              Pulsowanie:{' '}
+                              {(theme.scoreboard.clockRunningPulse ?? DEFAULT_CLOCK_APPEARANCE.clockRunningPulse)
+                                ? 'WŁ'
+                                : 'WYŁ'}
+                            </button>
+                          </div>
+                          <div className="grid grid-cols-2 gap-2">
+                            <div className="flex items-center justify-between bg-slate-950/70 px-2 py-1 rounded border border-slate-800">
+                              <span className="text-[11px] text-slate-300">Cyfry:</span>
+                              <input
+                                type="color"
+                                value={
+                                  theme.scoreboard.clockRunningColor ||
+                                  theme.scoreboard.clockColor ||
+                                  DEFAULT_CLOCK_APPEARANCE.clockRunningColor
+                                }
+                                onChange={(e) =>
+                                  updateScoreboard({
+                                    clockRunningColor: e.target.value,
+                                    clockColor: e.target.value,
+                                  })
+                                }
+                                className="w-6 h-6 rounded border border-slate-700 cursor-pointer bg-transparent"
+                              />
+                            </div>
+                            <div className="flex items-center justify-between bg-slate-950/70 px-2 py-1 rounded border border-slate-800">
+                              <span className="text-[11px] text-slate-300">Tło:</span>
+                              <input
+                                type="color"
+                                value={theme.scoreboard.clockRunningBg || DEFAULT_CLOCK_APPEARANCE.clockRunningBg}
+                                onChange={(e) => updateScoreboard({ clockRunningBg: e.target.value })}
+                                className="w-6 h-6 rounded border border-slate-700 cursor-pointer bg-transparent"
+                              />
+                            </div>
+                          </div>
+                        </div>
+
+                        {/* Intensity, Glow & Pulse Speed */}
+                        <div className="space-y-2 pt-1">
+                          <div>
+                            <div className="flex items-center justify-between mb-1">
+                              <span className="text-[11px] font-bold text-slate-300">Intensywność tła zegara:</span>
+                              <span className="font-mono text-[11px] font-bold text-amber-400">
+                                {theme.scoreboard.clockBgIntensity ?? DEFAULT_CLOCK_APPEARANCE.clockBgIntensity}%
+                              </span>
+                            </div>
+                            <input
+                              type="range"
+                              min={0}
+                              max={50}
+                              step={2}
+                              value={theme.scoreboard.clockBgIntensity ?? DEFAULT_CLOCK_APPEARANCE.clockBgIntensity}
+                              onChange={(e) => updateScoreboard({ clockBgIntensity: Number(e.target.value) })}
+                              className="w-full accent-amber-500 h-1.5 bg-slate-800 rounded-lg cursor-pointer"
+                            />
+                          </div>
+
+                          <div className="flex items-center justify-between gap-2">
+                            <button
+                              type="button"
+                              onClick={() =>
+                                updateScoreboard({
+                                  clockGlowEnabled: !(
+                                    theme.scoreboard.clockGlowEnabled ?? DEFAULT_CLOCK_APPEARANCE.clockGlowEnabled
+                                  ),
+                                })
+                              }
+                              className={`px-2.5 py-1 rounded-lg border text-[11px] font-bold ${
+                                (theme.scoreboard.clockGlowEnabled ?? DEFAULT_CLOCK_APPEARANCE.clockGlowEnabled)
+                                  ? 'bg-amber-500/20 border-amber-500/50 text-amber-200'
+                                  : 'bg-slate-900 border-slate-700 text-slate-400'
+                              }`}
+                            >
+                              Poświata:{' '}
+                              {(theme.scoreboard.clockGlowEnabled ?? DEFAULT_CLOCK_APPEARANCE.clockGlowEnabled)
+                                ? 'WŁ'
+                                : 'WYŁ'}
+                            </button>
+
+                            <div className="flex items-center gap-1">
+                              {(['slow', 'normal', 'fast'] as const).map((spd) => {
+                                const active =
+                                  (theme.scoreboard.clockPulseSpeed || DEFAULT_CLOCK_APPEARANCE.clockPulseSpeed) ===
+                                  spd;
+                                const label = spd === 'slow' ? 'Wolne' : spd === 'normal' ? 'Norm.' : 'Szybkie';
+                                return (
+                                  <button
+                                    key={spd}
+                                    type="button"
+                                    onClick={() => updateScoreboard({ clockPulseSpeed: spd })}
+                                    className={`px-2 py-1 rounded-lg border text-[10px] font-bold ${
+                                      active
+                                        ? 'bg-amber-500/20 border-amber-500/60 text-amber-200'
+                                        : 'bg-slate-900 border-slate-700 text-slate-400'
+                                    }`}
+                                  >
+                                    {label}
+                                  </button>
+                                );
+                              })}
+                            </div>
+                          </div>
                         </div>
                       </div>
                     </div>

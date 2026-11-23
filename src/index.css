@@ -68,3 +68,64 @@
   animation: popupBounceIn 0.22s cubic-bezier(0.16, 1, 0.3, 1) forwards;
 }
 
+@keyframes clockGentlePulse {
+  0%, 100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.55;
+  }
+}
+
+.animate-clock-pulse {
+  animation-name: clockGentlePulse;
+  animation-timing-function: ease-in-out;
+  animation-iteration-count: infinite;
+}
+
+@keyframes clockBgPulse {
+  0%, 100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.35;
+  }
+}
+
+.animate-clock-bg-pulse {
+  animation-name: clockBgPulse;
+  animation-timing-function: ease-in-out;
+  animation-iteration-count: infinite;
+}
+
+@keyframes pausedOverlayPulse {
+  0%, 100% {
+    opacity: 0.36;
+    transform: rotate(-12deg) scale(1);
+  }
+  50% {
+    opacity: 0.12;
+    transform: rotate(-12deg) scale(0.97);
+  }
+}
+
+.animate-paused-overlay {
+  animation-name: pausedOverlayPulse;
+  animation-timing-function: ease-in-out;
+  animation-iteration-count: infinite;
+}
+
+@keyframes screenBgPulse {
+  0%, 100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.2;
+  }
+}
+
+.animate-screen-bg-pulse {
+  animation-name: screenBgPulse;
+  animation-timing-function: ease-in-out;
+  animation-iteration-count: infinite;
+}

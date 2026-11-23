@@ -20,6 +20,7 @@ import {
   getPlayerFullName,
   getPlayerShortName,
 } from '../services/playerDisplay';
+import { applyMatchLineupChange } from '../services/playingTime';
 
 const formatNumAndName = (p: Player): string => {
   const n = p.lastName?.trim() || p.firstName?.trim();
@@ -115,8 +116,7 @@ export const PlayerSelector: React.FC<PlayerSelectorProps> = ({
         nextOnCourt: newOnCourt,
       });
       return {
-        ...prev,
-        onCourtPlayerIds: newOnCourt,
+        ...applyMatchLineupChange(prev, newOnCourt),
         events: [...prev.events, subEvent],
         updatedAt: Date.now(),
       };
@@ -196,8 +196,7 @@ export const PlayerSelector: React.FC<PlayerSelectorProps> = ({
           nextOnCourt,
         });
         return {
-          ...prev,
-          onCourtPlayerIds: nextOnCourt,
+          ...applyMatchLineupChange(prev, nextOnCourt),
           events: [...prev.events, subEvent],
           updatedAt: Date.now(),
         };
@@ -231,8 +230,7 @@ export const PlayerSelector: React.FC<PlayerSelectorProps> = ({
           nextOnCourt,
         });
         return {
-          ...prev,
-          onCourtPlayerIds: nextOnCourt,
+          ...applyMatchLineupChange(prev, nextOnCourt),
           events: [...prev.events, subEvent],
           updatedAt: Date.now(),
         };
@@ -247,8 +245,7 @@ export const PlayerSelector: React.FC<PlayerSelectorProps> = ({
           nextOnCourt,
         });
         return {
-          ...prev,
-          onCourtPlayerIds: nextOnCourt,
+          ...applyMatchLineupChange(prev, nextOnCourt),
           events: [...prev.events, subEvent],
           updatedAt: Date.now(),
         };
@@ -299,8 +296,7 @@ export const PlayerSelector: React.FC<PlayerSelectorProps> = ({
       }
 
       return {
-        ...prev,
-        onCourtPlayerIds: newFive,
+        ...applyMatchLineupChange(prev, newFive),
         events: [...prev.events, ...subEvents],
         updatedAt: Date.now(),
       };
@@ -322,8 +318,7 @@ export const PlayerSelector: React.FC<PlayerSelectorProps> = ({
         })
       );
       return {
-        ...prev,
-        onCourtPlayerIds: [],
+        ...applyMatchLineupChange(prev, []),
         events: [...prev.events, ...subEvents],
         updatedAt: Date.now(),
       };
@@ -345,7 +340,7 @@ export const PlayerSelector: React.FC<PlayerSelectorProps> = ({
   const activeBenchTarget = rosterPlayers.find((p) => p.id === subBenchPlayerId);
 
   return (
-    <div className="w-full bg-slate-900/95 border-b border-slate-800 p-2.5 sm:p-3 text-slate-100">
+    <div className="w-full bg-slate-900 border border-slate-800 rounded-2xl p-2.5 sm:p-3 text-slate-100 shadow-xl">
       {/* Header bar: Selected player callout & Substitution button */}
       <div className="flex items-center justify-between gap-2 mb-2">
         <div className="flex items-center gap-1.5 min-w-0">
@@ -407,6 +402,11 @@ export const PlayerSelector: React.FC<PlayerSelectorProps> = ({
           onClick={() => {
             playClickSound();
             triggerHaptic(20);
+            onUpdateMatch((prev) =>
+              prev.isClockRunning
+                ? { ...prev, isClockRunning: false, updatedAt: Date.now() }
+                : prev
+            );
             setIsSubModalOpen(true);
             setSubHistory([]);
             setLastSwapMessage(null);
@@ -419,13 +419,14 @@ export const PlayerSelector: React.FC<PlayerSelectorProps> = ({
         </button>
       </div>
 
-      {/* Primary Row: The 5 On-Court Players (Left Photo, Center Name & Number, Right Points, +/-, Eval & Fouls) */}
+      {/* Primary Row: The 5 On-Court Players (Top: Photo, Name & Prominent Points; Bottom: Eval, +/- & Fouls) */}
       <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-1.5 sm:gap-2">
         {onCourtPlayers.map((player, idx) => {
           const isSelected = selectedPlayerId === player.id;
           const stats = calculatePlayerStats(player, match.events, match);
           const isFifthOnTwoCol = idx === 4;
           const pTheme = liveTheme?.playerCards;
+          const statFontStyle = pTheme ? { fontSize: `${pTheme.nameFontSize}px` } : undefined;
 
           return (
             <button
@@ -441,7 +442,7 @@ export const PlayerSelector: React.FC<PlayerSelectorProps> = ({
                     }
                   : undefined
               }
-              className={`relative flex items-center justify-between p-1.5 sm:p-2.5 transition duration-150 active:scale-95 border select-none cursor-pointer overflow-hidden ${
+              className={`relative flex flex-col justify-between gap-1.5 p-2 sm:p-2.5 transition duration-150 active:scale-95 border select-none cursor-pointer overflow-hidden ${
                 pTheme ? pTheme.borderRadius : 'rounded-2xl'
               } ${isFifthOnTwoCol ? 'col-span-2 sm:col-span-1' : ''} ${
                 isSelected
@@ -449,163 +450,171 @@ export const PlayerSelector: React.FC<PlayerSelectorProps> = ({
                   : 'bg-slate-900/90 text-slate-200 border-slate-800 hover:border-slate-700 hover:bg-slate-850'
               }`}
             >
-              {/* 1. LEWA CZĘŚĆ: ZDJĘCIE ZAWODNIKA */}
-              <div className="shrink-0 mr-2 sm:mr-2.5">
-                {player.photo ? (
-                  <div className="relative w-11 h-11 sm:w-12 sm:h-12 rounded-xl overflow-hidden border border-amber-400/50 shadow-md bg-slate-950">
-                    <img
-                      src={player.photo}
-                      alt={getPlayerShortName(player)}
-                      className="w-full h-full object-cover"
-                    />
+              {/* GÓRNA CZĘŚĆ: ZDJĘCIE, NAZWISKO + NUMER ORAZ WYRAŹNA LICZBA PUNKTÓW PO PRAWEJ */}
+              <div className="flex items-center justify-between gap-2 w-full min-w-0">
+                <div className="flex items-center min-w-0 flex-1">
+                  {/* ZDJĘCIE / IKONA ZAWODNIKA */}
+                  <div className="shrink-0 mr-2">
+                    {player.photo ? (
+                      <div className="relative w-10 h-10 sm:w-11 sm:h-11 rounded-xl overflow-hidden border border-amber-400/50 shadow-md bg-slate-950">
+                        <img
+                          src={player.photo}
+                          alt={getPlayerShortName(player)}
+                          className="w-full h-full object-cover"
+                        />
+                      </div>
+                    ) : (
+                      <div
+                        className={`w-10 h-10 sm:w-11 sm:h-11 rounded-xl flex flex-col items-center justify-center font-mono font-black border shadow-inner ${
+                          isSelected
+                            ? 'bg-slate-950/25 border-slate-950/30 text-slate-950'
+                            : 'bg-slate-950 border-amber-500/30 text-amber-400'
+                        }`}
+                      >
+                        <span className="text-[8px] font-bold opacity-60 leading-none">NR</span>
+                        <span
+                          style={pTheme ? { fontSize: `${pTheme.numberFontSize}px` } : undefined}
+                          className="text-base leading-none"
+                        >
+                          #{player.number}
+                        </span>
+                      </div>
+                    )}
                   </div>
-                ) : (
-                  <div
-                    className={`w-11 h-11 sm:w-12 sm:h-12 rounded-xl flex flex-col items-center justify-center font-mono font-black border shadow-inner ${
-                      isSelected
-                        ? 'bg-slate-950/25 border-slate-950/30 text-slate-950'
-                        : 'bg-slate-950 border-amber-500/30 text-amber-400'
-                    }`}
-                  >
-                    <span className="text-[8px] font-bold opacity-60 leading-none">NR</span>
-                    <span
-                      style={pTheme ? { fontSize: `${pTheme.numberFontSize}px` } : undefined}
-                      className="text-base sm:text-lg leading-none"
+
+                  {/* NAZWISKO, NUMER I CZAS GRY */}
+                  <div className="flex-1 min-w-0 flex flex-col justify-center text-left">
+                    <div className="flex items-center gap-1 min-w-0">
+                      <span
+                        style={pTheme ? { fontSize: `${pTheme.numberFontSize}px` } : undefined}
+                        className={`font-mono font-black text-sm sm:text-base leading-none shrink-0 ${
+                          isSelected ? 'text-slate-950' : 'text-amber-400'
+                        }`}
+                      >
+                        #{player.number}
+                      </span>
+                      <span
+                        style={
+                          pTheme
+                            ? {
+                                fontSize: `${pTheme.nameFontSize}px`,
+                                color: isSelected ? pTheme.textSelected : pTheme.textUnselected,
+                              }
+                            : undefined
+                        }
+                        className={`font-black text-xs sm:text-sm uppercase tracking-tight truncate leading-tight ${
+                          isSelected ? 'text-slate-950' : 'text-white'
+                        }`}
+                        title={getPlayerFullName(player)}
+                      >
+                        {getCardPrimaryName(player)}
+                      </span>
+                    </div>
+                    <div
+                      className={`text-[10px] sm:text-[11px] font-semibold truncate leading-none mt-1 flex items-center gap-1 ${
+                        isSelected ? 'text-slate-900/80 font-bold' : 'text-slate-400'
+                      }`}
                     >
-                      #{player.number}
-                    </span>
+                      <span
+                        className={`font-mono font-bold shrink-0 ${
+                          isSelected ? 'text-slate-950' : 'text-sky-300'
+                        }`}
+                        title="Czas przebywania na parkiecie"
+                      >
+                        {formatSecondsToMMSS(stats.secondsPlayed)}
+                      </span>
+                      {getCardSecondaryName(player) && (
+                        <span className="truncate">• {getCardSecondaryName(player)}</span>
+                      )}
+                    </div>
                   </div>
-                )}
-              </div>
-
-              {/* 2. ŚRODKOWA CZĘŚĆ: NAZWISKO I NUMER */}
-              <div className="flex-1 min-w-0 flex flex-col justify-center text-left py-0.5">
-                <div className="flex items-center gap-1.5 min-w-0">
-                  <span
-                    style={pTheme ? { fontSize: `${pTheme.numberFontSize}px` } : undefined}
-                    className={`font-mono font-black text-sm sm:text-base leading-none shrink-0 ${
-                      isSelected ? 'text-slate-950' : 'text-amber-400'
-                    }`}
-                  >
-                    #{player.number}
-                  </span>
-                  <span
-                    style={
-                      pTheme
-                        ? {
-                            fontSize: `${pTheme.nameFontSize}px`,
-                            color: isSelected ? pTheme.textSelected : pTheme.textUnselected,
-                          }
-                        : undefined
-                    }
-                    className={`font-black text-xs sm:text-sm uppercase tracking-tight truncate leading-tight ${
-                      isSelected ? 'text-slate-950' : 'text-white'
-                    }`}
-                    title={getPlayerFullName(player)}
-                  >
-                    {getCardPrimaryName(player)}
-                  </span>
                 </div>
+
+                {/* PRAWA STRONA: TYLKO WYRAŹNA LICZBA ZDOBYTYCH PUNKTÓW */}
                 <div
-                  className={`text-[10px] sm:text-[11px] font-semibold truncate leading-none mt-1 flex items-center gap-1.5 ${
-                    isSelected ? 'text-slate-900/80 font-bold' : 'text-slate-400'
+                  className={`shrink-0 min-w-[38px] px-2 py-1 rounded-xl font-mono font-black leading-none flex items-center justify-center ${
+                    isSelected
+                      ? 'bg-slate-950 text-amber-300 shadow-inner'
+                      : 'bg-amber-500/15 text-amber-300 border border-amber-500/35'
                   }`}
+                  style={{ fontSize: pTheme ? `${Math.max(pTheme.ptsFontSize, 24)}px` : '26px' }}
+                  title="Zdobyte punkty w meczu"
                 >
-                  <span
-                    className={`font-mono font-bold shrink-0 ${
-                      isSelected ? 'text-slate-950' : 'text-sky-300'
-                    }`}
-                    title="Czas przebywania na parkiecie"
-                  >
-                    {formatSecondsToMMSS(stats.secondsPlayed)}
-                  </span>
-                  {getCardSecondaryName(player) && (
-                    <span className="truncate">• {getCardSecondaryName(player)}</span>
-                  )}
+                  {stats.pts}
                 </div>
               </div>
 
-              {/* 3. PRAWA CZĘŚĆ: PUNKTY, +/-, EVAL I FAULE */}
-              <div className="shrink-0 flex flex-col items-end justify-center gap-1 ml-2 pl-2 border-l border-slate-800/60 font-mono">
-                {/* GÓRNY RZĄD: PUNKTY ORAZ +/- */}
-                <div className="flex items-center gap-1">
-                  {/* PUNKTY */}
-                  <div
-                    className={`px-1.5 py-0.5 rounded font-black leading-none flex items-center gap-0.5 ${
-                      isSelected
-                        ? 'bg-slate-950 text-amber-300'
-                        : 'bg-amber-500/15 text-amber-300 border border-amber-500/30'
-                    }`}
-                    style={{ fontSize: pTheme ? `${pTheme.ptsFontSize}px` : '22px' }}
-                    title="Zdobyte punkty w meczu"
-                  >
-                    <span style={{ fontSize: pTheme ? `${pTheme.ptsFontSize}px` : '22px' }}>{stats.pts}</span>
-                    <span className="text-[9px] font-bold">pkt</span>
-                  </div>
+              {/* DOLNY RZĄD (POD IKONKĄ I NAZWISKIEM): EVAL:, +-: ORAZ Faule: (ROZMIAR CZCIONKI = NAZWISKO) */}
+              <div
+                className={`w-full flex flex-wrap items-center justify-between gap-1 pt-1.5 border-t tabular-nums ${
+                  isSelected ? 'border-slate-950/20' : 'border-slate-800/70'
+                }`}
+              >
+                {/* EVAL */}
+                <span
+                  style={statFontStyle}
+                  className={`px-1 py-0.5 rounded font-normal text-xs sm:text-sm leading-none whitespace-nowrap ${
+                    isSelected
+                      ? 'bg-slate-950/20 text-slate-950'
+                      : stats.eval > 0
+                      ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30'
+                      : stats.eval < 0
+                      ? 'text-rose-400 bg-rose-500/20 border border-rose-500/30'
+                      : 'bg-slate-800 text-slate-300'
+                  }`}
+                  title="Wskaźnik efektywności EVAL (FIBA)"
+                >
+                  <span>EVAL: </span>
+                  <span className="font-black">{stats.eval}</span>
+                </span>
 
-                  {/* +/- STATYSTYKA BILANSU */}
-                  <span
-                    style={pTheme ? { fontSize: `${pTheme.plusMinusFontSize}px` } : undefined}
-                    className={`px-1.5 py-0.5 rounded text-[10px] sm:text-[11px] font-black leading-none ${
-                      isSelected
-                        ? stats.plusMinus > 0
-                          ? 'bg-slate-950 text-emerald-300 font-extrabold'
-                          : stats.plusMinus < 0
-                          ? 'bg-slate-950 text-rose-300 font-extrabold'
-                          : 'bg-slate-950 text-slate-300 font-extrabold'
-                        : stats.plusMinus > 0
-                        ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/35 font-extrabold'
+                {/* +/- STATYSTYKA BILANSU */}
+                <span
+                  style={statFontStyle}
+                  className={`px-1 py-0.5 rounded font-normal text-xs sm:text-sm leading-none whitespace-nowrap ${
+                    isSelected
+                      ? stats.plusMinus > 0
+                        ? 'bg-slate-950 text-emerald-300'
                         : stats.plusMinus < 0
-                        ? 'bg-rose-500/20 text-rose-300 border border-rose-500/35 font-extrabold'
-                        : 'bg-slate-800 text-slate-400 border border-slate-700/60'
-                    }`}
-                    title="Wskaźnik +/- (bilans punktowy drużyny podczas obecności zawodnika na parkiecie)"
-                  >
+                        ? 'bg-slate-950 text-rose-300'
+                        : 'bg-slate-950 text-slate-300'
+                      : stats.plusMinus > 0
+                      ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/35'
+                      : stats.plusMinus < 0
+                      ? 'bg-rose-500/20 text-rose-300 border border-rose-500/35'
+                      : 'bg-slate-800 text-slate-300 border border-slate-700/60'
+                  }`}
+                  title="Wskaźnik +/- (bilans punktowy drużyny podczas obecności zawodnika na parkiecie)"
+                >
+                  <span>+-: </span>
+                  <span className="font-black">
                     {stats.plusMinus > 0 ? `+${stats.plusMinus}` : stats.plusMinus}
                   </span>
-                </div>
+                </span>
 
-                {/* DOLNY RZĄD: EVAL I FAULE */}
-                <div className="flex items-center gap-1">
-                  {/* EVAL */}
-                  <span
-                    className={`px-1 py-0.5 rounded font-black leading-none ${
-                      isSelected
-                        ? 'bg-slate-950/20 text-slate-950'
-                        : stats.eval > 0
-                        ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30'
-                        : stats.eval < 0
-                        ? 'text-rose-400 bg-rose-500/20 border border-rose-500/30'
-                        : 'bg-slate-800 text-slate-400'
-                    }`}
-                    style={{ fontSize: pTheme ? `${pTheme.evalFontSize}px` : idx === 0 ? '14px' : '15px' }}
-                    title="Wskaźnik efektywności EVAL (FIBA)"
-                  >
-                    E:{stats.eval}
-                  </span>
-
-                  {/* FAULE */}
-                  <span
-                    className={`px-1 py-0.5 rounded text-[9px] sm:text-[10px] font-black leading-none ${
-                      stats.fouls >= 5
-                        ? 'bg-rose-600 text-white'
-                        : stats.fouls >= 4
-                        ? 'bg-rose-500 text-white font-black'
-                        : isSelected
-                        ? 'bg-slate-950/20 text-slate-950'
-                        : stats.fouls > 0
-                        ? 'bg-slate-800 text-amber-300 border border-slate-700'
-                        : 'bg-slate-800/60 text-slate-400'
-                    }`}
-                    title={
-                      stats.fouls >= 5
-                        ? '5 fauli - zawodnik wykluczony!'
-                        : `Faule osobiste (${stats.fouls}/5)`
-                    }
-                  >
-                    {stats.fouls}F
-                  </span>
-                </div>
+                {/* FAULE */}
+                <span
+                  style={statFontStyle}
+                  className={`px-1 py-0.5 rounded font-normal text-xs sm:text-sm leading-none whitespace-nowrap ${
+                    stats.fouls >= 5
+                      ? 'bg-rose-600 text-white'
+                      : stats.fouls >= 4
+                      ? 'bg-rose-500 text-white'
+                      : isSelected
+                      ? 'bg-slate-950/20 text-slate-950'
+                      : stats.fouls > 0
+                      ? 'bg-slate-800 text-amber-300 border border-slate-700'
+                      : 'bg-slate-800/60 text-slate-300'
+                  }`}
+                  title={
+                    stats.fouls >= 5
+                      ? '5 fauli - zawodnik wykluczony!'
+                      : `Faule osobiste (${stats.fouls}/5)`
+                  }
+                >
+                  <span>Faule: </span>
+                  <span className="font-black">{stats.fouls}</span>
+                </span>
               </div>
             </button>
           );

@@ -238,9 +238,20 @@ const defaultScoreboard: ScoreboardStyle = {
   scoreColorOur: '#fcd34d',
   scoreColorOpp: '#f87171',
   scoreFontSize: 64,
-  clockColor: '#34d399',
+  clockColor: '#4ade80',
   clockFontSize: 32,
   clockBg: '#020617',
+  clockRunningColor: '#4ade80',
+  clockRunningBg: '#10b981',
+  clockPausedColor: '#f87171',
+  clockPausedBg: '#ef4444',
+  clockBgIntensity: 20,
+  clockGlowEnabled: true,
+  clockPausedPulse: true,
+  clockRunningPulse: false,
+  clockPulseSpeed: 'normal',
+  clockPausedFullscreenOverlay: true,
+  clockScreenBgPulse: true,
   fontFamily: 'mono',
   borderRadius: 'rounded-2xl',
 };
@@ -626,3 +637,52 @@ export function resetLiveMatchTheme(): LiveMatchTheme {
   saveLiveMatchTheme(DEFAULT_LIVE_MATCH_THEME);
   return DEFAULT_LIVE_MATCH_THEME;
 }
+
+export function hexToRgba(hex: string, alpha: number): string {
+  const safeAlpha = Math.max(0, Math.min(1, alpha));
+  const cleaned = (hex || '').replace('#', '').trim();
+  if (cleaned.length === 3) {
+    const r = parseInt(cleaned[0] + cleaned[0], 16);
+    const g = parseInt(cleaned[1] + cleaned[1], 16);
+    const b = parseInt(cleaned[2] + cleaned[2], 16);
+    if (!Number.isNaN(r) && !Number.isNaN(g) && !Number.isNaN(b)) {
+      return `rgba(${r}, ${g}, ${b}, ${safeAlpha})`;
+    }
+  }
+  if (cleaned.length === 6) {
+    const r = parseInt(cleaned.slice(0, 2), 16);
+    const g = parseInt(cleaned.slice(2, 4), 16);
+    const b = parseInt(cleaned.slice(4, 6), 16);
+    if (!Number.isNaN(r) && !Number.isNaN(g) && !Number.isNaN(b)) {
+      return `rgba(${r}, ${g}, ${b}, ${safeAlpha})`;
+    }
+  }
+  return `rgba(239, 68, 68, ${safeAlpha})`;
+}
+
+export function getClockPulseDuration(speed?: 'slow' | 'normal' | 'fast'): string {
+  switch (speed) {
+    case 'slow':
+      return '2.6s';
+    case 'fast':
+      return '0.85s';
+    case 'normal':
+    default:
+      return '1.5s';
+  }
+}
+
+export const DEFAULT_CLOCK_APPEARANCE = {
+  clockRunningColor: defaultScoreboard.clockRunningColor!,
+  clockRunningBg: defaultScoreboard.clockRunningBg!,
+  clockPausedColor: defaultScoreboard.clockPausedColor!,
+  clockPausedBg: defaultScoreboard.clockPausedBg!,
+  clockBgIntensity: defaultScoreboard.clockBgIntensity!,
+  clockGlowEnabled: defaultScoreboard.clockGlowEnabled!,
+  clockPausedPulse: defaultScoreboard.clockPausedPulse!,
+  clockRunningPulse: defaultScoreboard.clockRunningPulse!,
+  clockPulseSpeed: defaultScoreboard.clockPulseSpeed!,
+  clockPausedFullscreenOverlay: defaultScoreboard.clockPausedFullscreenOverlay!,
+  clockScreenBgPulse: defaultScoreboard.clockScreenBgPulse!,
+};
+

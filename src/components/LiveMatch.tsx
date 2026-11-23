@@ -7,6 +7,7 @@ import { ActionKeypad } from './ActionKeypad';
 import { BoxScoreTable } from './BoxScoreTable';
 import { PlayByPlayModal } from './PlayByPlayModal';
 import { calculatePlayerStats, getEventPoints, recalculateMatchScores } from '../services/statsCalculator';
+import { applyMatchLineupChange } from '../services/playingTime';
 import { announcePlay, triggerHaptic, playClickSound, playScoreSound } from '../services/tts';
 import { BarChart3, ListOrdered, CheckCircle2, Sparkles, FileText, UserCheck } from 'lucide-react';
 import { VoiceStatsAssistant } from './VoiceStatsAssistant';
@@ -15,7 +16,13 @@ import { LivePlayByPlayStream } from './LivePlayByPlayStream';
 import { LiveSpectatorActionPopup } from './LiveSpectatorActionPopup';
 import { SpectatorPlayerTracker } from './SpectatorPlayerTracker';
 import { LiveMatchTheme } from '../types/liveMatchTheme';
-import { getStoredLiveMatchTheme, THEME_CHANGE_EVENT } from '../services/liveMatchThemeService';
+import {
+  DEFAULT_CLOCK_APPEARANCE,
+  getClockPulseDuration,
+  getStoredLiveMatchTheme,
+  hexToRgba,
+  THEME_CHANGE_EVENT,
+} from '../services/liveMatchThemeService';
 
 interface LiveMatchProps {
   match: Match;
@@ -167,10 +174,10 @@ export const LiveMatch: React.FC<LiveMatchProps> = ({
     });
   };
 
-  // View mode: 'auto' (detect screen width: < 768px is mobile, >= 768px is tablet), or force 'mobile' / 'tablet'
+  // View mode: 'auto' (portrait: mobile, landscape: tablet), or force 'mobile' / 'tablet'
   const [viewMode, setViewMode] = useState<'auto' | 'mobile' | 'tablet'>(() => {
     try {
-      const stored = localStorage.getItem('basketstats_view_mode');
+      const stored = localStorage.getItem('basketstats_view_mode_v2');
       if (stored === 'mobile' || stored === 'tablet') return stored;
     } catch {
       // ignore
@@ -178,31 +185,53 @@ export const LiveMatch: React.FC<LiveMatchProps> = ({
     return 'auto';
   });
 
-  const [isScreenTablet, setIsScreenTablet] = useState<boolean>(() => {
+  const [isScreenLandscape, setIsScreenLandscape] = useState<boolean>(() => {
     if (typeof window !== 'undefined') {
-      return window.innerWidth >= 768;
+      return window.innerWidth > window.innerHeight;
     }
     return false;
   });
 
   useEffect(() => {
-    const handleResize = () => {
-      setIsScreenTablet(window.innerWidth >= 768);
+    let orientationTimer: number | undefined;
+    const updateOrientation = () => {
+      setIsScreenLandscape(window.innerWidth > window.innerHeight);
     };
-    window.addEventListener('resize', handleResize);
-    return () => window.removeEventListener('resize', handleResize);
+    const handleOrientationChange = () => {
+      updateOrientation();
+      window.clearTimeout(orientationTimer);
+      orientationTimer = window.setTimeout(updateOrientation, 80);
+    };
+
+    const mediaQuery =
+      typeof window.matchMedia === 'function'
+        ? window.matchMedia('(orientation: landscape)')
+        : null;
+
+    window.addEventListener('resize', updateOrientation);
+    window.addEventListener('orientationchange', handleOrientationChange);
+    mediaQuery?.addEventListener?.('change', updateOrientation);
+
+    return () => {
+      window.clearTimeout(orientationTimer);
+      window.removeEventListener('resize', updateOrientation);
+      window.removeEventListener('orientationchange', handleOrientationChange);
+      mediaQuery?.removeEventListener?.('change', updateOrientation);
+    };
   }, []);
 
   const handleSelectViewMode = (mode: 'auto' | 'mobile' | 'tablet') => {
-    setViewMode(mode);
+    const naturalMode = isScreenLandscape ? 'tablet' : 'mobile';
+    const resolvedMode = mode === naturalMode ? 'auto' : mode;
+    setViewMode(resolvedMode);
     try {
-      localStorage.setItem('basketstats_view_mode', mode);
+      localStorage.setItem('basketstats_view_mode_v2', resolvedMode);
     } catch {
       // ignore
     }
   };
 
-  const isTablet = viewMode === 'tablet' || (viewMode === 'auto' && isScreenTablet);
+  const isTablet = viewMode === 'tablet' || (viewMode === 'auto' && isScreenLandscape);
 
   // Roster players for this match
   const rosterPlayers = players.filter((p) =>
@@ -403,9 +432,13 @@ export const LiveMatch: React.FC<LiveMatchProps> = ({
         }
       }
 
+      const updatedBase =
+        nextOnCourt !== currentMatch.onCourtPlayerIds
+          ? applyMatchLineupChange(currentMatch, nextOnCourt)
+          : currentMatch;
+
       return {
-        ...currentMatch,
-        onCourtPlayerIds: nextOnCourt,
+        ...updatedBase,
         ourScore: recalculated.ourScore,
         opponentScore: recalculated.oppScore,
         quarterScores: recalculated.quarterScores,
@@ -432,8 +465,56 @@ export const LiveMatch: React.FC<LiveMatchProps> = ({
     });
   };
 
+  const handleOpenSubModal = () => {
+    if (onUpdateMatch) {
+      onUpdateMatch((prev) =>
+        prev.isClockRunning ? { ...prev, isClockRunning: false, updatedAt: Date.now() } : prev
+      );
+    }
+    setIsSubModalOpen(true);
+  };
+
+  const showScreenBgPulse =
+    !readOnly &&
+    match.status === 'live' &&
+    (liveTheme.scoreboard.clockScreenBgPulse ??
+      DEFAULT_CLOCK_APPEARANCE.clockScreenBgPulse);
+
+  const activeScreenBgHex = match.isClockRunning
+    ? liveTheme.scoreboard.clockRunningBg ||
+      DEFAULT_CLOCK_APPEARANCE.clockRunningBg
+    : liveTheme.scoreboard.clockPausedBg ||
+      DEFAULT_CLOCK_APPEARANCE.clockPausedBg;
+
+  const clockPulseDuration = getClockPulseDuration(
+    liveTheme.scoreboard.clockPulseSpeed
+  );
+
   return (
-    <div className="w-full flex-1 flex flex-col bg-slate-950 text-slate-100 min-h-full">
+    <div className="relative w-full flex-1 flex flex-col bg-slate-950 text-slate-100 min-h-full">
+      {/* Clock-synchronized green (running) / red (paused) flashing background layer strictly UNDERNEATH all boards */}
+      {showScreenBgPulse && (
+        <div
+          aria-hidden="true"
+          style={{
+            background: `linear-gradient(180deg, ${hexToRgba(
+              activeScreenBgHex,
+              0.55
+            )} 0%, ${hexToRgba(activeScreenBgHex, 0.35)} 50%, ${hexToRgba(
+              activeScreenBgHex,
+              0.55
+            )} 100%)`,
+            animationDuration: clockPulseDuration,
+          }}
+          className="absolute inset-0 pointer-events-none animate-screen-bg-pulse"
+        />
+      )}
+
+      <div
+        className={`relative flex-1 flex flex-col min-h-0 ${
+          !readOnly ? 'p-1.5 sm:p-2.5 gap-1.5 sm:gap-2.5' : ''
+        }`}
+      >
       {/* READ-ONLY SPECTATOR TOP BAR (Above Scoreboard) */}
       {readOnly && (
         <div className="max-w-5xl mx-auto w-full px-3 sm:px-5 pt-2.5 pb-1">
@@ -617,20 +698,9 @@ export const LiveMatch: React.FC<LiveMatchProps> = ({
       ) : (
         /* COACH / INTERACTIVE MATCH MODE */
         <>
-          {/* Voice Stats Assistant: Prowadzenie statystyk głosem i hands-free */}
-          <VoiceStatsAssistant
-            match={match}
-            rosterPlayers={rosterPlayers}
-            selectedPlayerId={selectedPlayerId}
-            onRecordBatchActions={handleRecordBatchActions}
-            onUndoLastAction={handleUndo}
-            onSelectPlayer={setSelectedPlayerId}
-            soundEnabled={soundEnabled}
-          />
-
           {isTablet ? (
             /* TABLET / DESKTOP VIEW (Preserves previous layout with full PlayerSelector & 4-row ActionKeypad) */
-            <div className="flex-1 flex flex-col min-h-0 space-y-2 p-1 sm:p-2">
+            <div className="flex-1 flex flex-col min-h-0 gap-1.5 sm:gap-2.5">
               {/* Primary Player Selector with photos, names, points, +/-, eval, fouls & bench */}
               <PlayerSelector
                 match={match}
@@ -648,7 +718,7 @@ export const LiveMatch: React.FC<LiveMatchProps> = ({
                   onCourtPlayers={rosterPlayers.filter((p) => match.onCourtPlayerIds.includes(p.id))}
                   selectedPlayerId={selectedPlayerId}
                   onSelectPlayer={setSelectedPlayerId}
-                  onOpenSubModal={() => setIsSubModalOpen(true)}
+                  onOpenSubModal={handleOpenSubModal}
                   selectedPlayer={selectedPlayer}
                   selectedPlayerPoints={selectedPlayerPoints}
                   selectedPlayerEval={selectedPlayerEval}
@@ -672,7 +742,7 @@ export const LiveMatch: React.FC<LiveMatchProps> = ({
                   onCourtPlayers={rosterPlayers.filter((p) => match.onCourtPlayerIds.includes(p.id))}
                   selectedPlayerId={selectedPlayerId}
                   onSelectPlayer={setSelectedPlayerId}
-                  onOpenSubModal={() => setIsSubModalOpen(true)}
+                  onOpenSubModal={handleOpenSubModal}
                   selectedPlayer={selectedPlayer}
                   selectedPlayerPoints={selectedPlayerPoints}
                   selectedPlayerEval={selectedPlayerEval}
@@ -699,6 +769,17 @@ export const LiveMatch: React.FC<LiveMatchProps> = ({
               />
             </>
           )}
+
+          {/* Voice Stats Assistant: Prowadzenie statystyk głosem i hands-free (na samym dole) */}
+          <VoiceStatsAssistant
+            match={match}
+            rosterPlayers={rosterPlayers}
+            selectedPlayerId={selectedPlayerId}
+            onRecordBatchActions={handleRecordBatchActions}
+            onUndoLastAction={handleUndo}
+            onSelectPlayer={setSelectedPlayerId}
+            soundEnabled={soundEnabled}
+          />
         </>
       )}
 
@@ -755,6 +836,41 @@ export const LiveMatch: React.FC<LiveMatchProps> = ({
           durationMs={3000}
         />
       )}
+
+      </div>
+
+      {/* Full-screen click-through pulsing watermark when match clock is paused */}
+      {!readOnly &&
+        match.status === 'live' &&
+        !match.isClockRunning &&
+        (liveTheme.scoreboard.clockPausedFullscreenOverlay ??
+          DEFAULT_CLOCK_APPEARANCE.clockPausedFullscreenOverlay) && (
+          <div
+            aria-hidden="true"
+            className="fixed inset-0 z-30 pointer-events-none select-none flex items-center justify-center overflow-hidden p-4"
+          >
+            <span
+              style={{
+                color:
+                  liveTheme.scoreboard.clockPausedColor ||
+                  DEFAULT_CLOCK_APPEARANCE.clockPausedColor,
+                textShadow:
+                  (liveTheme.scoreboard.clockGlowEnabled ??
+                    DEFAULT_CLOCK_APPEARANCE.clockGlowEnabled)
+                    ? `0 0 28px ${hexToRgba(
+                        liveTheme.scoreboard.clockPausedBg ||
+                          DEFAULT_CLOCK_APPEARANCE.clockPausedBg,
+                        0.65
+                      )}`
+                    : '0 2px 12px rgba(2, 6, 23, 0.75)',
+                animationDuration: clockPulseDuration,
+              }}
+              className="animate-paused-overlay text-[11vw] sm:text-6xl md:text-7xl lg:text-8xl font-black uppercase tracking-[0.12em] text-center leading-tight max-w-full"
+            >
+              Zegar zatrzymany
+            </span>
+          </div>
+        )}
     </div>
   );
 };

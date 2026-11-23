@@ -14,6 +14,7 @@ import {
 } from 'lucide-react';
 import { playClickSound, triggerHaptic } from '../services/tts';
 import { createSubstitutionEvent } from '../services/playerDisplay';
+import { applyMatchLineupChange } from '../services/playingTime';
 
 const formatNumAndName = (p: Player): string => {
   const n = p.lastName?.trim() || p.firstName?.trim();
@@ -91,8 +92,7 @@ export const SubstitutionModal: React.FC<SubstitutionModalProps> = ({
         eventId,
       });
       return {
-        ...prev,
-        onCourtPlayerIds: newOnCourt,
+        ...applyMatchLineupChange(prev, newOnCourt),
         events: [...prev.events, subEvent],
         updatedAt: Date.now(),
       };
@@ -201,8 +201,7 @@ export const SubstitutionModal: React.FC<SubstitutionModalProps> = ({
       }
 
       return {
-        ...prev,
-        onCourtPlayerIds: newFiveIds,
+        ...applyMatchLineupChange(prev, newFiveIds),
         events: [...prev.events, ...subEvents],
         updatedAt: Date.now(),
       };
@@ -230,8 +229,7 @@ export const SubstitutionModal: React.FC<SubstitutionModalProps> = ({
           nextOnCourt,
         });
         return {
-          ...prev,
-          onCourtPlayerIds: nextOnCourt,
+          ...applyMatchLineupChange(prev, nextOnCourt),
           events: [...prev.events, subEvent],
           updatedAt: Date.now(),
         };
@@ -244,8 +242,7 @@ export const SubstitutionModal: React.FC<SubstitutionModalProps> = ({
           nextOnCourt,
         });
         return {
-          ...prev,
-          onCourtPlayerIds: nextOnCourt,
+          ...applyMatchLineupChange(prev, nextOnCourt),
           events: [...prev.events, subEvent],
           updatedAt: Date.now(),
         };
@@ -262,8 +259,7 @@ export const SubstitutionModal: React.FC<SubstitutionModalProps> = ({
         id === record.inPlayer.id ? record.outPlayer.id : id
       );
       return {
-        ...prev,
-        onCourtPlayerIds: newOnCourt,
+        ...applyMatchLineupChange(prev, newOnCourt),
         events: record.eventId
           ? prev.events.filter((e) => e.id !== record.eventId)
           : prev.events,

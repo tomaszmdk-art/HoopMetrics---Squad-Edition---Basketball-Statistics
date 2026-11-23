@@ -269,10 +269,10 @@ export const ActionKeypad: React.FC<ActionKeypadProps> = ({
   const playerSlots = [0, 1, 2, 3, 4].map((idx) => onCourtPlayers[idx] || null);
 
   return (
-    <div className="w-full flex-1 flex flex-col justify-between p-1.5 sm:p-2.5 bg-slate-950 text-slate-100 select-none">
+    <div className="w-full flex-1 flex flex-col justify-between p-1.5 sm:p-2.5 bg-slate-900 border border-slate-800 rounded-2xl shadow-xl text-slate-100 select-none">
       {layoutMode === 'tablet' ? (
         /* TABLET ACTION KEYPAD: 4 Full-Width Rows, fully styled by liveTheme customizer */
-        <div className="flex-1 flex flex-col justify-between gap-2.5 p-1 sm:p-2 bg-slate-950">
+        <div className="flex-1 flex flex-col justify-between gap-2.5 p-1 sm:p-2">
           {/* Row 1: RZUTY ZA 2 I 3 PUNKTY (4 kolumny) */}
           <div className="grid grid-cols-4 gap-2 flex-1">
             {/* 2PT MADE */}

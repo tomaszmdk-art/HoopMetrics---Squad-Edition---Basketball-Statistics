@@ -1,9 +1,17 @@
 import React, { useState, useEffect } from 'react';
 import { AppSettings } from '../types/basketball';
-import { Settings, Volume2, Smartphone, Download, Check, Sparkles, Hand, Clock, X, Lock, KeyRound, Eye, EyeOff, RefreshCw, Mic, Shield, Scale, Palette } from 'lucide-react';
+import { Settings, Volume2, Smartphone, Download, Check, Sparkles, Hand, Clock, X, Lock, KeyRound, Eye, EyeOff, RefreshCw, Mic, Shield, Scale, Palette, Play, Pause, RotateCcw } from 'lucide-react';
 import { announcePlay, playClickSound, triggerHaptic } from '../services/tts';
 import { PWAInstallModal } from './PWAInstallModal';
 import { useLanguage } from '../i18n/LanguageContext';
+import { LiveMatchTheme } from '../types/liveMatchTheme';
+import {
+  DEFAULT_CLOCK_APPEARANCE,
+  getClockPulseDuration,
+  getStoredLiveMatchTheme,
+  hexToRgba,
+  saveLiveMatchTheme,
+} from '../services/liveMatchThemeService';
 
 interface SettingsModalProps {
   isOpen: boolean;
@@ -33,14 +41,29 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   const [pinInput, setPinInput] = useState(settings.coachPin || '');
   const [pinSaved, setPinSaved] = useState(false);
   const [showPin, setShowPin] = useState(false);
+  const [liveTheme, setLiveTheme] = useState<LiveMatchTheme>(getStoredLiveMatchTheme);
+  const [clockPreviewRunning, setClockPreviewRunning] = useState(false);
 
   useEffect(() => {
     if (isOpen) {
       setCurrent(settings);
       setPinInput(settings.coachPin || '');
       setPinSaved(false);
+      setLiveTheme(getStoredLiveMatchTheme());
     }
   }, [isOpen, settings]);
+
+  const updateClockStyle = (patch: Partial<LiveMatchTheme['scoreboard']>) => {
+    const next: LiveMatchTheme = {
+      ...liveTheme,
+      scoreboard: {
+        ...liveTheme.scoreboard,
+        ...patch,
+      },
+    };
+    setLiveTheme(next);
+    saveLiveMatchTheme(next);
+  };
 
   if (!isOpen) return null;
 
@@ -165,6 +188,302 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
               </button>
             </div>
           )}
+
+          {/* Wygląd, kolory, tło i pulsowanie zegara kwarty */}
+          {(() => {
+            const sb = liveTheme.scoreboard;
+            const runColor = sb.clockRunningColor || DEFAULT_CLOCK_APPEARANCE.clockRunningColor;
+            const runBg = sb.clockRunningBg || DEFAULT_CLOCK_APPEARANCE.clockRunningBg;
+            const pauseColor = sb.clockPausedColor || DEFAULT_CLOCK_APPEARANCE.clockPausedColor;
+            const pauseBg = sb.clockPausedBg || DEFAULT_CLOCK_APPEARANCE.clockPausedBg;
+            const intensity = sb.clockBgIntensity ?? DEFAULT_CLOCK_APPEARANCE.clockBgIntensity;
+            const glowOn = sb.clockGlowEnabled ?? DEFAULT_CLOCK_APPEARANCE.clockGlowEnabled;
+            const pausePulseOn = sb.clockPausedPulse ?? DEFAULT_CLOCK_APPEARANCE.clockPausedPulse;
+            const runPulseOn = sb.clockRunningPulse ?? DEFAULT_CLOCK_APPEARANCE.clockRunningPulse;
+            const pulseSpeed = sb.clockPulseSpeed || DEFAULT_CLOCK_APPEARANCE.clockPulseSpeed;
+            const fullscreenOverlayOn = sb.clockPausedFullscreenOverlay ?? DEFAULT_CLOCK_APPEARANCE.clockPausedFullscreenOverlay;
+            const screenBgPulseOn = sb.clockScreenBgPulse ?? DEFAULT_CLOCK_APPEARANCE.clockScreenBgPulse;
+            const pulseDur = getClockPulseDuration(pulseSpeed);
+
+            const previewColor = clockPreviewRunning ? runColor : pauseColor;
+            const previewBg = clockPreviewRunning ? runBg : pauseBg;
+            const previewPulsing = clockPreviewRunning ? runPulseOn : pausePulseOn;
+            const previewAlpha = intensity / 100;
+
+            return (
+              <div className="bg-slate-950/80 p-3.5 rounded-xl border border-slate-800 space-y-3">
+                <div className="flex items-center justify-between gap-2">
+                  <div className="flex items-center gap-2">
+                    <Clock className="w-4 h-4 text-emerald-400" />
+                    <span className="font-bold text-sm text-white">Zegar kwarty — kolory i pulsowanie</span>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      playClickSound();
+                      updateClockStyle({ ...DEFAULT_CLOCK_APPEARANCE });
+                    }}
+                    className="flex items-center gap-1 px-2 py-1 rounded-lg bg-slate-900 hover:bg-slate-800 border border-slate-700 text-[10px] font-bold text-slate-300"
+                    title="Przywróć domyślne kolory i pulsowanie zegara"
+                  >
+                    <RotateCcw className="w-3 h-3" />
+                    <span>Domyślne</span>
+                  </button>
+                </div>
+
+                {/* Klikalny podgląd na żywo */}
+                <div className="flex flex-col items-center gap-1.5 p-2.5 rounded-xl bg-slate-900/80 border border-slate-800">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      playClickSound();
+                      setClockPreviewRunning(!clockPreviewRunning);
+                    }}
+                    style={{
+                      borderColor: hexToRgba(previewBg, Math.min(0.95, previewAlpha + 0.5)),
+                      boxShadow: glowOn
+                        ? `0 0 18px ${hexToRgba(previewBg, Math.min(0.55, previewAlpha * 1.45))}`
+                        : undefined,
+                    }}
+                    className="relative px-5 py-2 rounded-2xl border-2 bg-slate-950 overflow-hidden flex flex-col items-center justify-center transition active:scale-95"
+                    title="Kliknij podgląd, aby przełączyć między PAUZA i START"
+                  >
+                    <div
+                      style={{
+                        background: `linear-gradient(180deg, ${hexToRgba(previewBg, previewAlpha)} 0%, ${hexToRgba(previewBg, previewAlpha * 0.45)} 100%)`,
+                        animationDuration: previewPulsing ? pulseDur : undefined,
+                      }}
+                      className={`absolute inset-0 pointer-events-none ${previewPulsing ? 'animate-clock-bg-pulse' : ''}`}
+                    />
+                    <span
+                      style={{
+                        color: previewColor,
+                        textShadow: glowOn ? `0 0 12px ${hexToRgba(previewColor, 0.6)}` : undefined,
+                        animationDuration: previewPulsing ? pulseDur : undefined,
+                      }}
+                      className={`relative z-10 font-mono font-black text-2xl leading-none ${previewPulsing ? 'animate-clock-pulse' : ''}`}
+                    >
+                      06:42
+                    </span>
+                    <span
+                      style={{
+                        color: previewColor,
+                        animationDuration: previewPulsing ? pulseDur : undefined,
+                      }}
+                      className={`relative z-10 mt-1 inline-flex items-center gap-1 text-[9px] font-black tracking-wider ${
+                        clockPreviewRunning ? '' : 'uppercase'
+                      } ${
+                        previewPulsing ? 'animate-clock-pulse' : ''
+                      }`}
+                    >
+                      {clockPreviewRunning ? (
+                        <>
+                          <Play className="w-2.5 h-2.5 fill-current" />
+                          <span>Zegar idzie</span>
+                        </>
+                      ) : (
+                        <>
+                          <Pause className="w-2.5 h-2.5 fill-current" />
+                          <span>PAUZA</span>
+                        </>
+                      )}
+                    </span>
+                  </button>
+                  <span className="text-[10px] text-slate-400">
+                    Kliknij podgląd powyżej, aby przetestować stan <strong className="text-slate-200">{clockPreviewRunning ? 'PAUZA' : 'Zegar idzie'}</strong>
+                  </span>
+                </div>
+
+                {/* Kolory stanu PAUZA i START */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                  <div className="p-2.5 rounded-xl bg-slate-900/70 border border-rose-500/30 space-y-2">
+                    <div className="font-bold text-[11px] text-rose-300 flex items-center gap-1">
+                      <Pause className="w-3 h-3 fill-current" />
+                      <span>Zegar zatrzymany (PAUZA)</span>
+                    </div>
+                    <div className="flex items-center justify-between">
+                      <span className="text-[11px] text-slate-300">Kolor cyfr i napisu:</span>
+                      <input
+                        type="color"
+                        value={pauseColor}
+                        onChange={(e) => updateClockStyle({ clockPausedColor: e.target.value })}
+                        className="w-7 h-6 rounded border border-slate-700 cursor-pointer bg-transparent"
+                      />
+                    </div>
+                    <div className="flex items-center justify-between">
+                      <span className="text-[11px] text-slate-300">Odcień tła i ramki:</span>
+                      <input
+                        type="color"
+                        value={pauseBg}
+                        onChange={(e) => updateClockStyle({ clockPausedBg: e.target.value })}
+                        className="w-7 h-6 rounded border border-slate-700 cursor-pointer bg-transparent"
+                      />
+                    </div>
+                    <div className="flex items-center justify-between pt-1 border-t border-slate-800">
+                      <span className="text-[11px] text-slate-300">Pulsowanie pauzy:</span>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          playClickSound();
+                          updateClockStyle({ clockPausedPulse: !pausePulseOn });
+                        }}
+                        className={`w-10 h-5 rounded-full transition p-0.5 flex items-center ${
+                          pausePulseOn ? 'bg-rose-500 justify-end' : 'bg-slate-800 justify-start'
+                        }`}
+                      >
+                        <span className="w-4 h-4 rounded-full bg-white shadow" />
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className="p-2.5 rounded-xl bg-slate-900/70 border border-emerald-500/30 space-y-2">
+                    <div className="font-bold text-[11px] text-emerald-300 flex items-center gap-1">
+                      <Play className="w-3 h-3 fill-current" />
+                      <span>Zegar włączony (START)</span>
+                    </div>
+                    <div className="flex items-center justify-between">
+                      <span className="text-[11px] text-slate-300">Kolor cyfr i napisu:</span>
+                      <input
+                        type="color"
+                        value={runColor}
+                        onChange={(e) =>
+                          updateClockStyle({
+                            clockRunningColor: e.target.value,
+                            clockColor: e.target.value,
+                          })
+                        }
+                        className="w-7 h-6 rounded border border-slate-700 cursor-pointer bg-transparent"
+                      />
+                    </div>
+                    <div className="flex items-center justify-between">
+                      <span className="text-[11px] text-slate-300">Odcień tła i ramki:</span>
+                      <input
+                        type="color"
+                        value={runBg}
+                        onChange={(e) => updateClockStyle({ clockRunningBg: e.target.value })}
+                        className="w-7 h-6 rounded border border-slate-700 cursor-pointer bg-transparent"
+                      />
+                    </div>
+                    <div className="flex items-center justify-between pt-1 border-t border-slate-800">
+                      <span className="text-[11px] text-slate-300">Pulsowanie biegu:</span>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          playClickSound();
+                          updateClockStyle({ clockRunningPulse: !runPulseOn });
+                        }}
+                        className={`w-10 h-5 rounded-full transition p-0.5 flex items-center ${
+                          runPulseOn ? 'bg-emerald-500 justify-end' : 'bg-slate-800 justify-start'
+                        }`}
+                      >
+                        <span className="w-4 h-4 rounded-full bg-white shadow" />
+                      </button>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Intensywność tła, szybkość pulsowania i poświata */}
+                <div className="p-2.5 rounded-xl bg-slate-900/70 border border-slate-800 space-y-2.5">
+                  <div>
+                    <div className="flex items-center justify-between mb-1">
+                      <span className="text-[11px] font-semibold text-slate-300">Intensywność koloru tła okienka:</span>
+                      <span className="font-mono text-[11px] font-bold text-amber-400">{intensity}%</span>
+                    </div>
+                    <input
+                      type="range"
+                      min={0}
+                      max={50}
+                      step={2}
+                      value={intensity}
+                      onChange={(e) => updateClockStyle({ clockBgIntensity: Number(e.target.value) })}
+                      className="w-full accent-amber-500 cursor-pointer"
+                    />
+                  </div>
+
+                  <div className="flex items-center justify-between gap-2 pt-1 border-t border-slate-800">
+                    <span className="text-[11px] font-semibold text-slate-300">Szybkość pulsowania:</span>
+                    <div className="grid grid-cols-3 gap-1">
+                      {(
+                        [
+                          { id: 'slow', label: 'Wolne' },
+                          { id: 'normal', label: 'Normalne' },
+                          { id: 'fast', label: 'Szybkie' },
+                        ] as const
+                      ).map((sp) => (
+                        <button
+                          key={sp.id}
+                          type="button"
+                          onClick={() => {
+                            playClickSound();
+                            updateClockStyle({ clockPulseSpeed: sp.id });
+                          }}
+                          className={`px-2 py-1 rounded-lg text-[10px] font-bold border transition ${
+                            pulseSpeed === sp.id
+                              ? 'bg-amber-500 text-slate-950 border-amber-400'
+                              : 'bg-slate-950 border-slate-800 text-slate-300 hover:bg-slate-800'
+                          }`}
+                        >
+                          {sp.label}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  <div className="flex items-center justify-between pt-1 border-t border-slate-800">
+                    <span className="text-[11px] font-semibold text-slate-300">Świecenie cyfr i ramki (Poświata):</span>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        playClickSound();
+                        updateClockStyle({ clockGlowEnabled: !glowOn });
+                      }}
+                      className={`w-10 h-5 rounded-full transition p-0.5 flex items-center ${
+                        glowOn ? 'bg-amber-500 justify-end' : 'bg-slate-800 justify-start'
+                      }`}
+                    >
+                      <span className="w-4 h-4 rounded-full bg-slate-950 shadow" />
+                    </button>
+                  </div>
+
+                  <div className="flex items-center justify-between gap-2 pt-1 border-t border-slate-800">
+                    <span className="text-[11px] font-semibold text-slate-300">
+                      Pulsujący napis „Zegar zatrzymany” na cały ekran:
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        playClickSound();
+                        updateClockStyle({ clockPausedFullscreenOverlay: !fullscreenOverlayOn });
+                      }}
+                      className={`w-10 h-5 rounded-full transition p-0.5 flex items-center shrink-0 ${
+                        fullscreenOverlayOn ? 'bg-rose-500 justify-end' : 'bg-slate-800 justify-start'
+                      }`}
+                    >
+                      <span className="w-4 h-4 rounded-full bg-white shadow" />
+                    </button>
+                  </div>
+
+                  <div className="flex items-center justify-between gap-2 pt-1 border-t border-slate-800">
+                    <span className="text-[11px] font-semibold text-slate-300">
+                      Migające tło ekranu (zielone / czerwone jak zegar):
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        playClickSound();
+                        updateClockStyle({ clockScreenBgPulse: !screenBgPulseOn });
+                      }}
+                      className={`w-10 h-5 rounded-full transition p-0.5 flex items-center shrink-0 ${
+                        screenBgPulseOn ? 'bg-emerald-500 justify-end' : 'bg-slate-800 justify-start'
+                      }`}
+                    >
+                      <span className="w-4 h-4 rounded-full bg-white shadow" />
+                    </button>
+                  </div>
+                </div>
+              </div>
+            );
+          })()}
 
           {/* Lektor meczowy (TTS) */}
           <div className="bg-slate-950/80 p-3.5 rounded-xl border border-slate-800 space-y-2.5">

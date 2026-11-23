@@ -27,6 +27,17 @@ export interface ScoreboardStyle {
   clockColor: string;
   clockFontSize: number; // in px
   clockBg: string;
+  clockRunningColor?: string;
+  clockRunningBg?: string;
+  clockPausedColor?: string;
+  clockPausedBg?: string;
+  clockBgIntensity?: number; // 0..50 (%)
+  clockGlowEnabled?: boolean;
+  clockPausedPulse?: boolean;
+  clockRunningPulse?: boolean;
+  clockPulseSpeed?: 'slow' | 'normal' | 'fast';
+  clockPausedFullscreenOverlay?: boolean;
+  clockScreenBgPulse?: boolean;
   fontFamily: TileFontFamily;
   borderRadius: TileCornerRadius;
 }

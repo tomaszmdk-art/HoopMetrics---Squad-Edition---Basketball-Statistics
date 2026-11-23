@@ -289,7 +289,7 @@ export const VoiceStatsAssistant: React.FC<VoiceStatsAssistantProps> = ({
   };
 
   return (
-    <div className="w-full bg-slate-900/95 border-b border-amber-500/20 transition-all duration-300">
+    <div className="w-full bg-slate-900 border border-amber-500/25 rounded-2xl shadow-xl transition-all duration-300">
       {/* Top Banner Row */}
       <div className="p-2 sm:p-2.5 flex items-center justify-between gap-2 max-w-7xl mx-auto">
         {/* Left: Main Mic Button + Live Status */}

@@ -25,6 +25,16 @@ import { ActionType, ClubProfile, Match } from '../types/basketball';
 import { playBuzzerSound, playClickSound, triggerHaptic, announcePlay } from '../services/tts';
 import { useLanguage } from '../i18n/LanguageContext';
 import { LiveMatchTheme } from '../types/liveMatchTheme';
+import {
+  DEFAULT_CLOCK_APPEARANCE,
+  getClockPulseDuration,
+  hexToRgba,
+} from '../services/liveMatchThemeService';
+import {
+  applyMatchClockChange,
+  applyMatchQuarterChange,
+  getQuarterMaxSeconds,
+} from '../services/playingTime';
 
 interface ScoreBoardProps {
   match: Match;
@@ -255,30 +265,9 @@ export const ScoreBoard: React.FC<ScoreBoardProps> = ({
       interval = setInterval(() => {
         onUpdateMatch((prev) => {
           if (!prev.isClockRunning) return prev;
-          const qKey = prev.currentQuarter || 1;
-          const nextSecondsPlayed: Record<string, number> = {
-            ...(prev.playerSecondsPlayed || {}),
-          };
-          const nextQuarterSecondsPlayed: Record<number, Record<string, number>> = {
-            ...(prev.playerQuarterSecondsPlayed || {}),
-          };
-          const currentQMap: Record<string, number> = {
-            ...(nextQuarterSecondsPlayed[qKey] || {}),
-          };
-
-          for (const pid of prev.onCourtPlayerIds || []) {
-            nextSecondsPlayed[pid] = (nextSecondsPlayed[pid] || 0) + 1;
-            currentQMap[pid] = (currentQMap[pid] || 0) + 1;
-          }
-          nextQuarterSecondsPlayed[qKey] = currentQMap;
 
           if (prev.clockSeconds > 1) {
-            return {
-              ...prev,
-              clockSeconds: prev.clockSeconds - 1,
-              playerSecondsPlayed: nextSecondsPlayed,
-              playerQuarterSecondsPlayed: nextQuarterSecondsPlayed,
-            };
+            return applyMatchClockChange(prev, prev.clockSeconds - 1);
           } else {
             // Clock hit 0:00! Quarter completed!
             playBuzzerSound();
@@ -307,14 +296,8 @@ export const ScoreBoard: React.FC<ScoreBoardProps> = ({
               announcePlay(`Koniec ${endedLabel}! Automatycznie aktywowano: ${nextLabel}.`);
             }
 
-            return {
-              ...prev,
-              isClockRunning: false,
-              currentQuarter: nextQ,
-              clockSeconds: nextQ === 5 ? 5 * 60 : prev.quarterMinutes * 60,
-              playerSecondsPlayed: nextSecondsPlayed,
-              playerQuarterSecondsPlayed: nextQuarterSecondsPlayed,
-            };
+            const nextQuarterStart = getQuarterMaxSeconds(prev.quarterMinutes, nextQ);
+            return applyMatchQuarterChange(prev, nextQ, nextQuarterStart, 0);
           }
         });
       }, 1000);
@@ -337,11 +320,9 @@ export const ScoreBoard: React.FC<ScoreBoardProps> = ({
   const adjustClock = (deltaSeconds: number) => {
     if (!onUpdateMatch) return;
     onUpdateMatch((prev) => {
-      const newSeconds = Math.max(0, Math.min(prev.quarterMinutes * 60, prev.clockSeconds + deltaSeconds));
-      return {
-        ...prev,
-        clockSeconds: newSeconds,
-      };
+      const maxSec = getQuarterMaxSeconds(prev.quarterMinutes, prev.currentQuarter);
+      const newSeconds = Math.max(0, Math.min(maxSec, prev.clockSeconds + deltaSeconds));
+      return applyMatchClockChange(prev, newSeconds);
     });
   };
 
@@ -350,12 +331,14 @@ export const ScoreBoard: React.FC<ScoreBoardProps> = ({
     if (!onUpdateMatch) return;
     playClickSound();
     triggerHaptic(30);
-    onUpdateMatch((prev) => ({
-      ...prev,
-      currentQuarter: q,
-      isClockRunning: false,
-      clockSeconds: q === 5 ? 5 * 60 : prev.quarterMinutes * 60,
-    }));
+    onUpdateMatch((prev) =>
+      applyMatchQuarterChange(
+        prev,
+        q,
+        getQuarterMaxSeconds(prev.quarterMinutes, q),
+        prev.clockSeconds
+      )
+    );
     setRollbackTargetQuarter(null);
   };
 
@@ -390,8 +373,27 @@ export const ScoreBoard: React.FC<ScoreBoardProps> = ({
 
   const quarters = [1, 2, 3, 4, 5];
 
+  const sbTheme = liveTheme?.scoreboard;
+  const clockRunningColor = sbTheme?.clockRunningColor || DEFAULT_CLOCK_APPEARANCE.clockRunningColor;
+  const clockRunningBgHex = sbTheme?.clockRunningBg || DEFAULT_CLOCK_APPEARANCE.clockRunningBg;
+  const clockPausedColor = sbTheme?.clockPausedColor || DEFAULT_CLOCK_APPEARANCE.clockPausedColor;
+  const clockPausedBgHex = sbTheme?.clockPausedBg || DEFAULT_CLOCK_APPEARANCE.clockPausedBg;
+  const clockBgIntensity = (sbTheme?.clockBgIntensity ?? DEFAULT_CLOCK_APPEARANCE.clockBgIntensity) / 100;
+  const clockGlowEnabled = sbTheme?.clockGlowEnabled ?? DEFAULT_CLOCK_APPEARANCE.clockGlowEnabled;
+  const clockPausedPulse = sbTheme?.clockPausedPulse ?? DEFAULT_CLOCK_APPEARANCE.clockPausedPulse;
+  const clockRunningPulse = sbTheme?.clockRunningPulse ?? DEFAULT_CLOCK_APPEARANCE.clockRunningPulse;
+  const clockPulseDuration = getClockPulseDuration(sbTheme?.clockPulseSpeed);
+
+  const activeClockColor = match.isClockRunning ? clockRunningColor : clockPausedColor;
+  const activeClockBgHex = match.isClockRunning ? clockRunningBgHex : clockPausedBgHex;
+  const isClockPulsing = !isHoldingClock && (match.isClockRunning ? clockRunningPulse : clockPausedPulse);
+
   return (
-    <div className="w-full bg-slate-900 border-b border-slate-800 p-1.5 sm:p-3 text-slate-100 shadow-xl select-none">
+    <div
+      className={`w-full bg-slate-900 p-1.5 sm:p-3 text-slate-100 shadow-xl select-none ${
+        readOnly ? 'border-b border-slate-800' : 'rounded-2xl border border-slate-800'
+      }`}
+    >
       {/* 1. TOP HEADER BAR: Tablet mode displays direct quarters & tools; Mobile mode displays compact bar with expandable Opcje */}
       {layoutMode === 'tablet' ? (
         /* TABLET TOP BAR */
@@ -453,9 +455,9 @@ export const ScoreBoard: React.FC<ScoreBoardProps> = ({
               {/* Layout Switcher (Tablet <-> Mobile) */}
               {onSelectViewMode && (
                 <button
-                  onClick={() => onSelectViewMode(viewMode === 'mobile' ? 'tablet' : 'mobile')}
+                  onClick={() => onSelectViewMode('mobile')}
                   className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-amber-300 border border-slate-700 text-xs font-bold transition active:scale-95"
-                  title="Przełącz układ: Telefon / Tablet"
+                  title="Przełącz układ: Telefon / Tablet (domyślnie: pion = Telefon, poziom = Tablet)"
                 >
                   <Tablet className="w-3.5 h-3.5 text-amber-400" />
                   <span>Układ: Tablet</span>
@@ -540,7 +542,7 @@ export const ScoreBoard: React.FC<ScoreBoardProps> = ({
           <div className="flex items-center gap-1.5 shrink-0">
             {onSelectViewMode && (
               <button
-                onClick={() => onSelectViewMode(viewMode === 'tablet' ? 'mobile' : 'tablet')}
+                onClick={() => onSelectViewMode('tablet')}
                 className="flex items-center gap-1 px-2.5 py-1.5 rounded-xl bg-gradient-to-b from-slate-800 to-slate-900 hover:from-slate-700 hover:to-slate-800 text-amber-300 border-2 border-slate-700/80 shadow-md shadow-black/40 text-[11px] font-bold transition active:scale-95"
                 title="Przełącz na układ tabletowy"
               >
@@ -640,29 +642,17 @@ export const ScoreBoard: React.FC<ScoreBoardProps> = ({
             {onSelectViewMode && (
               <button
                 onClick={() => {
-                  onSelectViewMode(viewMode === 'tablet' ? 'mobile' : 'tablet');
+                  onSelectViewMode('tablet');
                   setIsMenuOpen(false);
                 }}
                 className="p-2 rounded-xl bg-gradient-to-b from-slate-800 to-slate-900 hover:from-slate-700 hover:to-slate-800 border-2 border-slate-700/80 text-amber-300 text-xs font-bold flex items-center gap-1.5 transition active:scale-95 shadow-sm min-w-0"
               >
                 <Tablet className="w-3.5 h-3.5 text-amber-400 shrink-0" />
-                <span className="truncate">Widok: {viewMode === 'tablet' ? 'Tablet' : 'Telefon'}</span>
+                <span className="truncate">
+                  Widok: Telefon{viewMode === 'auto' ? ' (Auto)' : ''}
+                </span>
               </button>
             )}
-
-            {/* Manual Clock Edit Trigger */}
-            <button
-              onClick={() => {
-                setEditMinutes(Math.floor(match.clockSeconds / 60));
-                setEditSeconds(match.clockSeconds % 60);
-                setIsEditingClock(true);
-                setIsMenuOpen(false);
-              }}
-              className="p-2 rounded-xl bg-gradient-to-b from-slate-800 to-slate-900 hover:from-slate-700 hover:to-slate-800 border-2 border-slate-700/80 text-slate-200 text-xs font-bold flex items-center gap-1.5 transition active:scale-95 shadow-sm min-w-0"
-            >
-              <Clock className="w-3.5 h-3.5 text-amber-400 shrink-0" />
-              <span className="truncate">Ustaw czas kwarty</span>
-            </button>
 
             {/* Stats Mode Switcher */}
             {onToggleStatsMode && (
@@ -794,54 +784,13 @@ export const ScoreBoard: React.FC<ScoreBoardProps> = ({
           </div>
 
           {/* CENTER: GAME CLOCK (Col 4) */}
-          <div className="col-span-4 flex flex-col items-center justify-center border-x border-slate-800/80 px-3">
+          <div className="col-span-4 flex flex-col items-center justify-center border-x border-slate-800/80 px-2 sm:px-3">
             <span className="text-xs font-bold uppercase tracking-wider text-amber-400/90 mb-1">
               {match.currentQuarter > 4 ? 'Dogrywka (OT)' : `Kwarta ${match.currentQuarter}`}
             </span>
 
-            {/* Digits Display: Tap toggle, hold 3s edit */}
-            <div
-              onMouseDown={() => startClockPress(false)}
-              onMouseUp={() => endClockPress(false)}
-              onMouseLeave={cancelClockPress}
-              onTouchStart={() => startClockPress(true)}
-              onTouchEnd={() => endClockPress(true)}
-              onTouchCancel={cancelClockPress}
-              onContextMenu={(e) => e.preventDefault()}
-              className={`relative px-4 py-1.5 rounded-2xl border transition-all cursor-pointer select-none overflow-hidden touch-none my-1 shadow-lg ${
-                isHoldingClock
-                  ? 'border-amber-400 bg-amber-500/15 ring-2 ring-amber-400/50 scale-[1.03]'
-                  : match.isClockRunning
-                    ? 'border-emerald-500/70 bg-slate-900/95 ring-1 ring-emerald-500/40 hover:border-emerald-400 active:scale-95 shadow-emerald-950/40'
-                    : 'border-amber-500/40 bg-slate-900/95 ring-1 ring-amber-500/20 hover:border-amber-400 active:scale-95 shadow-amber-950/20'
-              }`}
-              title="Kliknij zegar: Włącz/Wyłącz (Start/Pauza) • Przytrzymaj 3s: Ustaw czas"
-            >
-              {isHoldingClock && (
-                <div
-                  className="absolute inset-0 bg-gradient-to-r from-amber-500/25 via-orange-500/35 to-amber-500/45 transition-all pointer-events-none"
-                  style={{ width: `${longPressProgress}%` }}
-                />
-              )}
-
-              <div
-                style={
-                  liveTheme
-                    ? {
-                        color: liveTheme.scoreboard.clockColor,
-                        fontSize: `${liveTheme.scoreboard.clockFontSize}px`,
-                      }
-                    : undefined
-                }
-                className="relative z-10 flex items-center justify-center text-3xl sm:text-4xl md:text-5xl font-mono font-black tracking-tight leading-none text-white drop-shadow"
-              >
-                <span>{formattedTime}</span>
-              </div>
-            </div>
-
-            {/* Controls Spaced Out: -1s / Big Start-Pause / +1s / Edit */}
-            {!readOnly && (
-              <div className="flex items-center gap-2 mt-2">
+            <div className="flex items-center justify-center gap-2 sm:gap-3 my-1">
+              {!readOnly && (
                 <button
                   type="button"
                   onMouseDown={(e) => handleClockAdjustPressStart(-1, e)}
@@ -851,35 +800,109 @@ export const ScoreBoard: React.FC<ScoreBoardProps> = ({
                   onTouchEnd={handleClockAdjustPressEnd}
                   onTouchCancel={handleClockAdjustPressEnd}
                   onContextMenu={(e) => e.preventDefault()}
-                  className="w-9 h-9 rounded-xl bg-slate-900 hover:bg-slate-800 text-rose-300 font-mono font-bold text-sm border border-slate-700 active:scale-95 transition flex items-center justify-center select-none"
+                  className="w-10 h-10 rounded-xl bg-slate-900 hover:bg-slate-800 active:bg-rose-500/25 text-rose-300 font-mono font-black text-sm border border-slate-700/80 active:scale-95 transition flex items-center justify-center select-none shrink-0 touch-none"
                   title="Odejmij 1s (przytrzymaj: przewijaj szybciej)"
                 >
                   -1s
                 </button>
+              )}
 
-                {/* Big Start / Pause Button Spaced Apart (User request 1) */}
-                <button
-                  onClick={toggleClock}
-                  className={`px-4 py-2 rounded-xl text-xs font-black flex items-center gap-1.5 transition active:scale-95 shadow-md ${
-                    match.isClockRunning
-                      ? 'bg-rose-500/20 hover:bg-rose-500/30 text-rose-300 border border-rose-500/40 shadow-rose-950/30'
-                      : 'bg-emerald-500 hover:bg-emerald-400 text-slate-950 shadow-emerald-950/30'
+              {/* Digits Display: Tap anywhere on box to toggle Start/Pause, hold 3s to edit */}
+              <div
+                onMouseDown={() => startClockPress(false)}
+                onMouseUp={() => endClockPress(false)}
+                onMouseLeave={cancelClockPress}
+                onTouchStart={() => startClockPress(true)}
+                onTouchEnd={() => endClockPress(true)}
+                onTouchCancel={cancelClockPress}
+                onContextMenu={(e) => e.preventDefault()}
+                style={{
+                  borderColor: isHoldingClock
+                    ? '#fbbf24'
+                    : hexToRgba(activeClockBgHex, Math.min(0.95, clockBgIntensity + 0.5)),
+                  boxShadow:
+                    !isHoldingClock && clockGlowEnabled
+                      ? `0 0 22px ${hexToRgba(activeClockBgHex, Math.min(0.55, clockBgIntensity * 1.45))}`
+                      : undefined,
+                }}
+                className={`relative min-w-[132px] sm:min-w-[160px] px-3 sm:px-4 py-2 rounded-2xl border-2 bg-slate-950/95 transition-all select-none overflow-hidden touch-none shadow-lg flex flex-col items-center justify-center ${
+                  readOnly ? 'cursor-default' : 'cursor-pointer active:scale-95'
+                } ${
+                  isHoldingClock ? 'ring-2 ring-amber-400/50 scale-[1.03]' : ''
+                }`}
+                title={
+                  readOnly
+                    ? 'Zegar czasu kwarty'
+                    : 'Kliknij zegar: Włącz/Wyłącz • Przytrzymaj 3s: Ustaw czas'
+                }
+              >
+                {/* Dynamic Tinted Background Layer (Reddish on Pause / Greenish on Running) */}
+                {!isHoldingClock && (
+                  <div
+                    style={{
+                      background: `linear-gradient(180deg, ${hexToRgba(activeClockBgHex, clockBgIntensity)} 0%, ${hexToRgba(activeClockBgHex, clockBgIntensity * 0.45)} 100%)`,
+                      animationDuration: isClockPulsing ? clockPulseDuration : undefined,
+                    }}
+                    className={`absolute inset-0 pointer-events-none ${
+                      isClockPulsing ? 'animate-clock-bg-pulse' : ''
+                    }`}
+                  />
+                )}
+
+                {isHoldingClock && (
+                  <div
+                    className="absolute inset-0 bg-gradient-to-r from-amber-500/25 via-orange-500/35 to-amber-500/45 transition-all pointer-events-none"
+                    style={{ width: `${longPressProgress}%` }}
+                  />
+                )}
+
+                <div
+                  style={{
+                    color: activeClockColor,
+                    fontSize: sbTheme ? `${sbTheme.clockFontSize}px` : undefined,
+                    textShadow: clockGlowEnabled
+                      ? `0 0 14px ${hexToRgba(activeClockColor, 0.6)}`
+                      : undefined,
+                    animationDuration: isClockPulsing ? clockPulseDuration : undefined,
+                  }}
+                  className={`relative z-10 flex items-center justify-center text-3xl sm:text-4xl md:text-5xl font-mono font-black tracking-tight leading-none drop-shadow ${
+                    isClockPulsing ? 'animate-clock-pulse' : ''
                   }`}
-                  title="Start / Pauza zegara gry"
                 >
-                  {match.isClockRunning ? (
-                    <>
-                      <Pause className="w-3.5 h-3.5 fill-current" />
-                      <span>PAUZA</span>
-                    </>
-                  ) : (
-                    <>
-                      <Play className="w-3.5 h-3.5 fill-current" />
-                      <span>START</span>
-                    </>
-                  )}
-                </button>
+                  <span>{formattedTime}</span>
+                </div>
 
+                <div className="relative z-10 mt-1 flex items-center justify-center">
+                  {isHoldingClock ? (
+                    <span className="text-[10px] font-bold text-amber-300">
+                      ⏱️ {Math.max(1, Math.ceil((3000 - (longPressProgress / 100) * 3000) / 1000))}s — Ustaw czas
+                    </span>
+                  ) : match.isClockRunning ? (
+                    <span
+                      style={{ color: activeClockColor }}
+                      className="inline-flex items-center gap-1 text-[10px] font-black tracking-wider"
+                    >
+                      <Play className="w-2.5 h-2.5 fill-current" />
+                      <span>Zegar idzie</span>
+                    </span>
+                  ) : (
+                    <span
+                      style={{
+                        color: activeClockColor,
+                        animationDuration: isClockPulsing ? clockPulseDuration : undefined,
+                      }}
+                      className={`inline-flex items-center gap-1 text-[10px] font-black tracking-widest uppercase ${
+                        isClockPulsing ? 'animate-clock-pulse' : ''
+                      }`}
+                    >
+                      <Pause className="w-2.5 h-2.5 fill-current" />
+                      <span>PAUZA</span>
+                    </span>
+                  )}
+                </div>
+              </div>
+
+              {!readOnly && (
                 <button
                   type="button"
                   onMouseDown={(e) => handleClockAdjustPressStart(1, e)}
@@ -889,25 +912,13 @@ export const ScoreBoard: React.FC<ScoreBoardProps> = ({
                   onTouchEnd={handleClockAdjustPressEnd}
                   onTouchCancel={handleClockAdjustPressEnd}
                   onContextMenu={(e) => e.preventDefault()}
-                  className="w-9 h-9 rounded-xl bg-slate-900 hover:bg-slate-800 text-emerald-300 font-mono font-bold text-sm border border-slate-700 active:scale-95 transition flex items-center justify-center select-none"
+                  className="w-10 h-10 rounded-xl bg-slate-900 hover:bg-slate-800 active:bg-emerald-500/25 text-emerald-300 font-mono font-black text-sm border border-slate-700/80 active:scale-95 transition flex items-center justify-center select-none shrink-0 touch-none"
                   title="Dodaj 1s (przytrzymaj: przewijaj szybciej)"
                 >
                   +1s
                 </button>
-
-                <button
-                  onClick={() => {
-                    setEditMinutes(Math.floor(match.clockSeconds / 60));
-                    setEditSeconds(match.clockSeconds % 60);
-                    setIsEditingClock(true);
-                  }}
-                  className="p-2 rounded-xl bg-slate-900 hover:bg-slate-800 text-amber-400 border border-slate-700 active:scale-95 transition"
-                  title="Ustaw dokładny czas kwarty"
-                >
-                  <Clock className="w-4 h-4" />
-                </button>
-              </div>
-            )}
+              )}
+            </div>
           </div>
 
           {/* RIGHT: OPPONENT TEAM (Col 4) */}
@@ -978,12 +989,12 @@ export const ScoreBoard: React.FC<ScoreBoardProps> = ({
                 }
               : undefined
           }
-          className={`grid grid-cols-3 items-center gap-2 sm:gap-3 bg-slate-950/85 p-2 sm:p-3 border border-slate-800/80 ${
+          className={`grid grid-cols-3 items-stretch gap-2 sm:gap-3 bg-slate-950/85 p-2 sm:p-3 border border-slate-800/80 ${
             liveTheme ? liveTheme.scoreboard.borderRadius : 'rounded-2xl'
           }`}
         >
           {/* COLUMN 1: OUR TEAM (-1 / SCORE / +1) */}
-          <div className="flex flex-col items-center justify-between gap-1 w-full">
+          <div className="flex flex-col items-center justify-between gap-1 h-full w-full">
             {/* -1 Button */}
             {!readOnly && onRecordAction ? (
               <button
@@ -1047,7 +1058,7 @@ export const ScoreBoard: React.FC<ScoreBoardProps> = ({
           </div>
 
           {/* COLUMN 2: CLOCK (-1 / TIME / +1) */}
-          <div className="flex flex-col items-center justify-between gap-1 border-x border-slate-800/80 px-1 w-full">
+          <div className="flex flex-col items-center justify-between gap-1 border-x border-slate-800/80 px-1 h-full w-full">
             {/* -1 Button (with accelerating hold!) */}
             {!readOnly ? (
               <button
@@ -1059,7 +1070,7 @@ export const ScoreBoard: React.FC<ScoreBoardProps> = ({
                 onTouchEnd={handleClockAdjustPressEnd}
                 onTouchCancel={handleClockAdjustPressEnd}
                 onContextMenu={(e) => e.preventDefault()}
-                className="w-full max-w-[125px] h-9 xs:h-10 sm:h-11 rounded-xl bg-gradient-to-b from-slate-800 to-slate-900 hover:from-slate-700 hover:to-slate-800 active:from-rose-950 active:to-slate-900 text-rose-300 hover:text-white font-mono font-black text-lg xs:text-xl border-2 border-slate-700/80 shadow-md shadow-black/50 active:scale-95 transition flex items-center justify-center select-none touch-none"
+                className="w-full max-w-[110px] h-9 xs:h-10 sm:h-11 shrink-0 rounded-xl bg-gradient-to-b from-slate-800 to-slate-900 hover:from-slate-700 hover:to-slate-800 active:from-rose-950 active:to-slate-900 text-rose-300 hover:text-white font-mono font-black text-lg xs:text-xl border-2 border-slate-700/80 shadow-md shadow-black/50 active:scale-95 transition flex items-center justify-center select-none touch-none"
                 title="Kliknij: -1 sekunda • Przytrzymaj: przewijaj czas szybciej w narastającym tempie"
               >
                 <span>-1</span>
@@ -1068,7 +1079,7 @@ export const ScoreBoard: React.FC<ScoreBoardProps> = ({
               <div className="h-9 xs:h-10 sm:h-11" />
             )}
 
-            {/* Game Clock Display Box: Click = Toggle Start/Stop; Hold 3s = Set time */}
+            {/* Game Clock Display Box: Click anywhere on box = Toggle Start/Stop; Hold 3s = Set time */}
             <div
               onMouseDown={() => startClockPress(false)}
               onMouseUp={() => endClockPress(false)}
@@ -1077,15 +1088,39 @@ export const ScoreBoard: React.FC<ScoreBoardProps> = ({
               onTouchEnd={() => endClockPress(true)}
               onTouchCancel={cancelClockPress}
               onContextMenu={(e) => e.preventDefault()}
-              className={`relative w-full max-w-[145px] flex flex-col items-center justify-center rounded-2xl border-2 transition-colors cursor-pointer select-none overflow-hidden touch-none py-1.5 sm:py-2.5 px-1 shadow-md my-0.5 ${
-                isHoldingClock
-                  ? 'border-amber-400 bg-gradient-to-b from-amber-500/25 to-slate-950 ring-2 ring-amber-400/60'
-                  : match.isClockRunning
-                    ? 'border-emerald-500/80 bg-gradient-to-b from-slate-900 to-slate-950 ring-1 ring-emerald-500/40 hover:border-emerald-400 active:scale-95'
-                    : 'border-amber-500/50 bg-gradient-to-b from-slate-900 to-slate-950 ring-1 ring-amber-500/20 hover:border-amber-400 active:scale-95'
+              style={{
+                borderColor: isHoldingClock
+                  ? '#fbbf24'
+                  : hexToRgba(activeClockBgHex, Math.min(0.95, clockBgIntensity + 0.5)),
+                boxShadow:
+                  !isHoldingClock && clockGlowEnabled
+                    ? `0 0 18px ${hexToRgba(activeClockBgHex, Math.min(0.55, clockBgIntensity * 1.45))}`
+                    : undefined,
+              }}
+              className={`relative w-full max-w-[145px] flex flex-col items-center justify-center rounded-2xl border-2 bg-slate-950/95 transition-all select-none overflow-hidden touch-none py-1.5 sm:py-2.5 px-1 shadow-md my-0.5 ${
+                readOnly ? 'cursor-default' : 'cursor-pointer active:scale-95'
+              } ${
+                isHoldingClock ? 'ring-2 ring-amber-400/60' : ''
               }`}
-              title="Kliknij zegar, aby włączyć/wyłączyć (Start/Pauza) • Przytrzymaj 3s: Ustaw czas"
+              title={
+                readOnly
+                  ? 'Zegar czasu kwarty'
+                  : 'Kliknij zegar, aby włączyć/wyłączyć (Start/Pauza) • Przytrzymaj 3s: Ustaw czas'
+              }
             >
+              {/* Dynamic Tinted Background Layer */}
+              {!isHoldingClock && (
+                <div
+                  style={{
+                    background: `linear-gradient(180deg, ${hexToRgba(activeClockBgHex, clockBgIntensity)} 0%, ${hexToRgba(activeClockBgHex, clockBgIntensity * 0.45)} 100%)`,
+                    animationDuration: isClockPulsing ? clockPulseDuration : undefined,
+                  }}
+                  className={`absolute inset-0 pointer-events-none ${
+                    isClockPulsing ? 'animate-clock-bg-pulse' : ''
+                  }`}
+                />
+              )}
+
               {/* Dynamic 3s Long Press Progress Bar Fill */}
               {isHoldingClock && (
                 <div
@@ -1102,15 +1137,17 @@ export const ScoreBoard: React.FC<ScoreBoardProps> = ({
 
               {/* Digits Display */}
               <div
-                style={
-                  liveTheme
-                    ? {
-                        color: liveTheme.scoreboard.clockColor,
-                        fontSize: `${liveTheme.scoreboard.clockFontSize}px`,
-                      }
-                    : undefined
-                }
-                className="relative z-10 flex items-center justify-center text-2xl xs:text-3xl sm:text-4xl md:text-5xl font-mono font-black tracking-tight leading-none text-white"
+                style={{
+                  color: activeClockColor,
+                  fontSize: sbTheme ? `${sbTheme.clockFontSize}px` : undefined,
+                  textShadow: clockGlowEnabled
+                    ? `0 0 14px ${hexToRgba(activeClockColor, 0.6)}`
+                    : undefined,
+                  animationDuration: isClockPulsing ? clockPulseDuration : undefined,
+                }}
+                className={`relative z-10 flex items-center justify-center text-2xl xs:text-3xl sm:text-4xl md:text-5xl font-mono font-black tracking-tight leading-none ${
+                  isClockPulsing ? 'animate-clock-pulse' : ''
+                }`}
               >
                 <span>{formattedTime}</span>
               </div>
@@ -1122,12 +1159,23 @@ export const ScoreBoard: React.FC<ScoreBoardProps> = ({
                     Ustawienia czasu...
                   </span>
                 ) : match.isClockRunning ? (
-                  <span className="inline-flex items-center gap-1 text-[8px] xs:text-[9px] font-black text-emerald-400">
+                  <span
+                    style={{ color: activeClockColor }}
+                    className="inline-flex items-center gap-1 text-[8px] xs:text-[9px] font-black tracking-wider"
+                  >
                     <Play className="w-2.5 h-2.5 fill-current" />
-                    <span>START</span>
+                    <span>Zegar idzie</span>
                   </span>
                 ) : (
-                  <span className="inline-flex items-center gap-1 text-[8px] xs:text-[9px] font-bold text-rose-400">
+                  <span
+                    style={{
+                      color: activeClockColor,
+                      animationDuration: isClockPulsing ? clockPulseDuration : undefined,
+                    }}
+                    className={`inline-flex items-center gap-1 text-[8px] xs:text-[9px] font-black tracking-wider uppercase ${
+                      isClockPulsing ? 'animate-clock-pulse' : ''
+                    }`}
+                  >
                     <Pause className="w-2.5 h-2.5 fill-current" />
                     <span>PAUZA</span>
                   </span>
@@ -1146,7 +1194,7 @@ export const ScoreBoard: React.FC<ScoreBoardProps> = ({
                 onTouchEnd={handleClockAdjustPressEnd}
                 onTouchCancel={handleClockAdjustPressEnd}
                 onContextMenu={(e) => e.preventDefault()}
-                className="w-full max-w-[125px] h-9 xs:h-10 sm:h-11 rounded-xl bg-gradient-to-b from-slate-800 to-slate-900 hover:from-slate-700 hover:to-slate-800 active:from-emerald-950 active:to-slate-900 text-emerald-300 hover:text-white font-mono font-black text-lg xs:text-xl border-2 border-slate-700/80 shadow-md shadow-black/50 active:scale-95 transition flex items-center justify-center select-none touch-none"
+                className="w-full max-w-[110px] h-9 xs:h-10 sm:h-11 shrink-0 rounded-xl bg-gradient-to-b from-slate-800 to-slate-900 hover:from-slate-700 hover:to-slate-800 active:from-emerald-950 active:to-slate-900 text-emerald-300 hover:text-white font-mono font-black text-lg xs:text-xl border-2 border-slate-700/80 shadow-md shadow-black/50 active:scale-95 transition flex items-center justify-center select-none touch-none"
                 title="Kliknij: +1 sekunda • Przytrzymaj: przewijaj czas szybciej w narastającym tempie"
               >
                 <span>+1</span>
@@ -1157,7 +1205,7 @@ export const ScoreBoard: React.FC<ScoreBoardProps> = ({
           </div>
 
           {/* COLUMN 3: OPPONENT (-1 / SCORE / +1) */}
-          <div className="flex flex-col items-center justify-between gap-1 w-full">
+          <div className="flex flex-col items-center justify-between gap-1 h-full w-full">
             {/* -1 Button */}
             {!readOnly && onRecordAction ? (
               <button
@@ -1290,7 +1338,10 @@ export const ScoreBoard: React.FC<ScoreBoardProps> = ({
                   type="button"
                   onClick={() => {
                     const currentTotal = editMinutes * 60 + editSeconds;
-                    const next = Math.min(match.quarterMinutes * 60, currentTotal + 1);
+                    const next = Math.min(
+                      getQuarterMaxSeconds(match.quarterMinutes, match.currentQuarter),
+                      currentTotal + 1
+                    );
                     setEditMinutes(Math.floor(next / 60));
                     setEditSeconds(next % 60);
                   }}
@@ -1302,7 +1353,10 @@ export const ScoreBoard: React.FC<ScoreBoardProps> = ({
                   type="button"
                   onClick={() => {
                     const currentTotal = editMinutes * 60 + editSeconds;
-                    const next = Math.min(match.quarterMinutes * 60, currentTotal + 30);
+                    const next = Math.min(
+                      getQuarterMaxSeconds(match.quarterMinutes, match.currentQuarter),
+                      currentTotal + 30
+                    );
                     setEditMinutes(Math.floor(next / 60));
                     setEditSeconds(next % 60);
                   }}
@@ -1322,12 +1376,9 @@ export const ScoreBoard: React.FC<ScoreBoardProps> = ({
               </button>
               <button
                 onClick={() => {
-                  const total = editMinutes * 60 + editSeconds;
+                  const total = Math.max(0, editMinutes * 60 + editSeconds);
                   if (onUpdateMatch) {
-                    onUpdateMatch((prev) => ({
-                      ...prev,
-                      clockSeconds: total,
-                    }));
+                    onUpdateMatch((prev) => applyMatchClockChange(prev, total));
                   }
                   setIsEditingClock(false);
                 }}

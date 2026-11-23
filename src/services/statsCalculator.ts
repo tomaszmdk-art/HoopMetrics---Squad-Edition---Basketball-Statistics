@@ -70,6 +70,8 @@ function estimatePlayerQuarterSecondsFromEvents(
           qSeconds += delta;
         }
         prevClock = evClock;
+      } else if (evClock > prevClock) {
+        prevClock = evClock;
       }
       if (Array.isArray(ev.onCourtPlayerIds) && ev.onCourtPlayerIds.length > 0) {
         currentLineup = [...ev.onCourtPlayerIds];
@@ -118,7 +120,9 @@ export function calculatePlayerQuarterSeconds(
   if (!matchObj) return result;
 
   const recorded = matchObj.playerQuarterSecondsPlayed;
-  if (recorded && Object.keys(recorded).length > 0) {
+  const usesStintTracking =
+    matchObj.onCourtEntryClock !== undefined || matchObj.playerBankedQuarterSeconds !== undefined;
+  if (recorded && (usesStintTracking || Object.keys(recorded).length > 0)) {
     for (const [qStr, playerMap] of Object.entries(recorded)) {
       const qNum = Math.min(Math.max(1, Number(qStr) || 1), 5);
       result[qNum] = (result[qNum] || 0) + Math.max(0, Math.floor(playerMap?.[playerId] || 0));
@@ -260,7 +264,12 @@ export function calculatePlayerStats(
   let secondsPlayed = 0;
   if (matchOrOnCourtIds && !Array.isArray(matchOrOnCourtIds) && typeof matchOrOnCourtIds === 'object') {
     const matchObj = matchOrOnCourtIds as Match;
-    if (matchObj.playerSecondsPlayed && Object.keys(matchObj.playerSecondsPlayed).length > 0) {
+    const usesStintTracking =
+      matchObj.onCourtEntryClock !== undefined || matchObj.playerBankedQuarterSeconds !== undefined;
+    if (
+      matchObj.playerSecondsPlayed &&
+      (usesStintTracking || Object.keys(matchObj.playerSecondsPlayed).length > 0)
+    ) {
       secondsPlayed = Math.max(0, Math.floor(matchObj.playerSecondsPlayed[player.id] || 0));
     } else {
       secondsPlayed = estimatePlayerSecondsFromEvents(player.id, events, matchObj);

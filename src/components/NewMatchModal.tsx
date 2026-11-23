@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { ClubProfile, Match, Player, TeamCategory, DEFAULT_SEASONS, getMatchSeason } from '../types/basketball';
 import { X, Trophy, Users, MapPin, Calendar, Clock, Check, Award } from 'lucide-react';
 import { playClickSound, triggerHaptic } from '../services/tts';
+import { initializePlayingTimeForStarters } from '../services/playingTime';
 
 interface NewMatchModalProps {
   isOpen: boolean;
@@ -116,8 +117,7 @@ export const NewMatchModal: React.FC<NewMatchModalProps> = ({
       status: 'live',
       rosterPlayerIds: selectedPlayerIds,
       onCourtPlayerIds: starters,
-      playerSecondsPlayed: {},
-      playerQuarterSecondsPlayed: {},
+      ...initializePlayingTimeForStarters(starters, quarterMinutes),
       currentQuarter: 1,
       clockSeconds: quarterMinutes * 60,
       isClockRunning: false,
