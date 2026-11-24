@@ -109,6 +109,25 @@ export const TeamExportImportModal: React.FC<TeamExportImportModalProps> = ({
   const [isLoadingClubTeams, setIsLoadingClubTeams] = useState<boolean>(false);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const clubsFetchInFlightRef = useRef<boolean>(false);
+
+  const loadLzkoszClubsList = async (forceRefresh = false) => {
+    if (clubsFetchInFlightRef.current) return;
+    clubsFetchInFlightRef.current = true;
+    setIsLoadingClubs(true);
+    setClubsLoadError(null);
+    try {
+      const res = await fetchLzkoszClubs(forceRefresh);
+      setLzkoszClubs(res.clubs || []);
+    } catch (err: unknown) {
+      setClubsLoadError(
+        (err as Error)?.message || 'Nie udało się pobrać listy klubów z lzkosz.pl.'
+      );
+    } finally {
+      clubsFetchInFlightRef.current = false;
+      setIsLoadingClubs(false);
+    }
+  };
 
   // When modal opens, sync default tab
   useEffect(() => {
@@ -124,32 +143,9 @@ export const TeamExportImportModal: React.FC<TeamExportImportModalProps> = ({
   // Lazy-load ŁZKosz clubs list when user switches to ŁZKosz import
   useEffect(() => {
     if (!isOpen || activeTab !== 'import' || importSource !== 'lzkosz') return;
-    if (lzkoszClubs.length > 0 || isLoadingClubs) return;
-
-    let cancelled = false;
-    setIsLoadingClubs(true);
-    setClubsLoadError(null);
-    fetchLzkoszClubs()
-      .then((res) => {
-        if (!cancelled) {
-          setLzkoszClubs(res.clubs || []);
-        }
-      })
-      .catch((err: unknown) => {
-        if (!cancelled) {
-          setClubsLoadError(
-            (err as Error)?.message || 'Nie udało się pobrać listy klubów z lzkosz.pl.'
-          );
-        }
-      })
-      .finally(() => {
-        if (!cancelled) setIsLoadingClubs(false);
-      });
-
-    return () => {
-      cancelled = true;
-    };
-  }, [isOpen, activeTab, importSource, lzkoszClubs.length, isLoadingClubs]);
+    if (lzkoszClubs.length > 0 || clubsFetchInFlightRef.current) return;
+    void loadLzkoszClubsList(false);
+  }, [isOpen, activeTab, importSource, lzkoszClubs.length]);
 
   if (!isOpen) return null;
 
@@ -784,7 +780,7 @@ export const TeamExportImportModal: React.FC<TeamExportImportModalProps> = ({
 
                     <div className="flex flex-col sm:flex-row gap-2">
                       <input
-                        type="url"
+                        type="text"
                         value={lzkoszUrl}
                         onChange={(e) => setLzkoszUrl(e.target.value)}
                         onKeyDown={(e) => {
@@ -863,8 +859,7 @@ export const TeamExportImportModal: React.FC<TeamExportImportModalProps> = ({
                         <button
                           type="button"
                           onClick={() => {
-                            setLzkoszClubs([]);
-                            setClubsLoadError(null);
+                            void loadLzkoszClubsList(true);
                           }}
                           className="px-2 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-white font-bold text-[11px]"
                         >

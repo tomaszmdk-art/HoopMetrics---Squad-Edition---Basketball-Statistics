@@ -103,6 +103,15 @@ export function normalizeAndValidateLzkoszUrl(
   if (!candidate) {
     throw new Error('Adres URL nie może być pusty.');
   }
+
+  // If user pasted text containing a URL (e.g. "https://lzkosz.pl/... - lub coś"), extract the URL token
+  const urlTokenMatch = candidate.match(/(https?:\/\/[^\s"'<>]+|(?:www\.)?lzkosz\.pl\/[^\s"'<>]*)/i);
+  if (urlTokenMatch) {
+    candidate = urlTokenMatch[1];
+  }
+  // Strip common trailing punctuation from copy-pasted URLs
+  candidate = candidate.replace(/[.,;:!?)\]-]+$/, '').trim();
+
   if (!/^https?:\/\//i.test(candidate)) {
     if (/^(www\.)?lzkosz\.pl(\/|$)/i.test(candidate)) {
       candidate = `https://${candidate}`;

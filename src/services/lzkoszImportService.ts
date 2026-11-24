@@ -94,26 +94,48 @@ export function isSafeDisplayImageSrc(src?: string): string | undefined {
   return undefined;
 }
 
+async function parseJsonApiResponse<T>(res: Response, fallbackMsg: string): Promise<T> {
+  const rawText = await res.text().catch(() => '');
+  let parsed: any = null;
+  if (rawText) {
+    try {
+      parsed = JSON.parse(rawText);
+    } catch {
+      parsed = null;
+    }
+  }
+  if (!res.ok) {
+    const serverMsg = typeof parsed?.error === 'string' && parsed.error.trim() ? parsed.error.trim() : '';
+    throw new Error(serverMsg || `${fallbackMsg} (HTTP ${res.status})`);
+  }
+  if (!parsed || typeof parsed !== 'object') {
+    throw new Error(`${fallbackMsg} (nieoczekiwana odpowiedź serwera)`);
+  }
+  return parsed as T;
+}
+
 export async function fetchLzkoszClubs(forceRefresh = false): Promise<{
   seasonName: string;
   clubs: LzkoszClubSummary[];
 }> {
-  const res = await fetch(`/api/lzkosz/clubs${forceRefresh ? '?refresh=1' : ''}`);
-  const data = await res.json().catch(() => ({}));
-  if (!res.ok) {
-    throw new Error(data?.error || 'Nie udało się pobrać listy klubów z lzkosz.pl.');
-  }
-  return data;
+  const res = await fetch(`/api/lzkosz/clubs${forceRefresh ? '?refresh=1' : ''}`, {
+    headers: { Accept: 'application/json' },
+  });
+  return parseJsonApiResponse<{ seasonName: string; clubs: LzkoszClubSummary[] }>(
+    res,
+    'Nie udało się pobrać listy klubów z lzkosz.pl.'
+  );
 }
 
 export async function fetchLzkoszClubTeams(clubId: number | string): Promise<LzkoszClubTeamsResponse> {
   const cleanId = String(clubId).trim();
-  const res = await fetch(`/api/lzkosz/club-teams?clubId=${encodeURIComponent(cleanId)}`);
-  const data = await res.json().catch(() => ({}));
-  if (!res.ok) {
-    throw new Error(data?.error || 'Nie udało się pobrać drużyn wybranego klubu.');
-  }
-  return data;
+  const res = await fetch(`/api/lzkosz/club-teams?clubId=${encodeURIComponent(cleanId)}`, {
+    headers: { Accept: 'application/json' },
+  });
+  return parseJsonApiResponse<LzkoszClubTeamsResponse>(
+    res,
+    'Nie udało się pobrać drużyn wybranego klubu.'
+  );
 }
 
 export async function fetchLzkoszTeamPreview(
@@ -122,14 +144,13 @@ export async function fetchLzkoszTeamPreview(
 ): Promise<LzkoszTeamPreviewApiResponse | LzkoszClubRedirectApiResponse> {
   const res = await fetch('/api/lzkosz/team-preview', {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
     body: JSON.stringify({ url: url.trim(), includePhotos }),
   });
-  const data = await res.json().catch(() => ({}));
-  if (!res.ok) {
-    throw new Error(data?.error || 'Nie udało się pobrać składu ze strony lzkosz.pl.');
-  }
-  return data;
+  return parseJsonApiResponse<LzkoszTeamPreviewApiResponse | LzkoszClubRedirectApiResponse>(
+    res,
+    'Nie udało się pobrać składu ze strony lzkosz.pl.'
+  );
 }
 
 export function buildImportPreviewFromLzkosz(

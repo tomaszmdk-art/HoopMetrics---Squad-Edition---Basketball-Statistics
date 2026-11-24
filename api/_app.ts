@@ -9,7 +9,7 @@ import {
   getLzkoszClubs,
   getLzkoszClubTeams,
   previewLzkoszTeam,
-} from './lzkoszService';
+} from './lzkoszService.js';
 
 dotenv.config();
 
@@ -1203,7 +1203,7 @@ Zwróć TYLKO poprawny JSON (bez markdown) w formacie:
       res.json(data);
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : 'Nie udało się pobrać listy klubów ŁZKosz.pl';
-      res.status(502).json({ error: msg });
+      res.status(422).json({ error: msg });
     }
   });
 
@@ -1219,7 +1219,7 @@ Zwróć TYLKO poprawny JSON (bez markdown) w formacie:
       res.json(data);
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : 'Nie udało się pobrać drużyn wybranego klubu';
-      res.status(502).json({ error: msg });
+      res.status(422).json({ error: msg });
     }
   });
 
@@ -1243,7 +1243,7 @@ Zwróć TYLKO poprawny JSON (bez markdown) w formacie:
         msg.includes('HTTPS') ||
         msg.includes('port') ||
         msg.includes('Nieprawidłowy');
-      res.status(isValidationError ? 400 : 502).json({ error: msg });
+      res.status(isValidationError ? 400 : 422).json({ error: msg });
     }
   });
 
