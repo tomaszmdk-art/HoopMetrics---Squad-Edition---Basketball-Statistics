@@ -201,7 +201,12 @@ export const PlayerSelector: React.FC<PlayerSelectorProps> = ({
           updatedAt: Date.now(),
         };
       });
-      setLastSwapMessage(`Dodano na parkiet: #${targetPlayer?.number}`);
+      if (!selectedPlayerId) {
+        onSelectPlayer(playerId);
+      }
+      if (targetPlayer) {
+        setLastSwapMessage(`Wszedł na parkiet: ${formatNumAndName(targetPlayer)}`);
+      }
       setSubBenchPlayerId(null);
       return;
     }
@@ -307,8 +312,9 @@ export const PlayerSelector: React.FC<PlayerSelectorProps> = ({
   };
 
   const handleClearCourt = () => {
+    if (match.onCourtPlayerIds.length === 0) return;
     playClickSound();
-    triggerHaptic(30);
+    triggerHaptic(45);
     onUpdateMatch((prev) => {
       const subEvents = prev.onCourtPlayerIds.map((id) =>
         createSubstitutionEvent(prev, {
@@ -323,7 +329,36 @@ export const PlayerSelector: React.FC<PlayerSelectorProps> = ({
         updatedAt: Date.now(),
       };
     });
-    setLastSwapMessage(`Parkiet wyczyszczony. Wybierz 5 zawodników.`);
+    onSelectPlayer(null);
+    setSubCourtPlayerId(null);
+    setSubBenchPlayerId(null);
+    setLastSwapMessage(`Zeszła cała piątka (0/5). Wybierz nowy skład z ławki rezerwowych.`);
+  };
+
+  const handleRemoveSingleFromCourt = (playerId: string) => {
+    playClickSound();
+    triggerHaptic(20);
+    const targetPlayer = rosterPlayers.find((p) => p.id === playerId);
+    onUpdateMatch((prev) => {
+      if (!prev.onCourtPlayerIds.includes(playerId)) return prev;
+      const nextOnCourt = prev.onCourtPlayerIds.filter((id) => id !== playerId);
+      const subEvent = createSubstitutionEvent(prev, {
+        type: 'SUB_OUT',
+        outPlayer: targetPlayer,
+        nextOnCourt,
+      });
+      return {
+        ...applyMatchLineupChange(prev, nextOnCourt),
+        events: [...prev.events, subEvent],
+        updatedAt: Date.now(),
+      };
+    });
+    if (selectedPlayerId === playerId) {
+      onSelectPlayer(null);
+    }
+    if (subCourtPlayerId === playerId) {
+      setSubCourtPlayerId(null);
+    }
   };
 
   const handleCloseModal = () => {
@@ -726,8 +761,8 @@ export const PlayerSelector: React.FC<PlayerSelectorProps> = ({
             </div>
 
             {/* Mode Switcher Tabs */}
-            <div className="flex items-center justify-between gap-2 px-3.5 sm:px-4 pt-3 pb-2 border-b border-slate-800/80 bg-slate-900">
-              <div className="flex items-center gap-1.5">
+            <div className="flex items-center justify-between gap-2 flex-wrap px-3.5 sm:px-4 pt-3 pb-2 border-b border-slate-800/80 bg-slate-900">
+              <div className="flex items-center gap-1.5 flex-wrap">
                 <button
                   onClick={() => {
                     playClickSound();
@@ -756,6 +791,21 @@ export const PlayerSelector: React.FC<PlayerSelectorProps> = ({
                 >
                   <SlidersHorizontal className="w-3.5 h-3.5" />
                   <span>Zaznacz całą piątkę ({match.onCourtPlayerIds.length}/5)</span>
+                </button>
+
+                <button
+                  type="button"
+                  disabled={onCourtPlayers.length === 0}
+                  onClick={handleClearCourt}
+                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-black border transition ${
+                    onCourtPlayers.length > 0
+                      ? 'bg-rose-500/20 hover:bg-rose-500/30 text-rose-300 border-rose-500/40 active:scale-95'
+                      : 'bg-slate-800/50 text-slate-600 border-slate-800 cursor-not-allowed'
+                  }`}
+                  title="Wszyscy zawodnicy schodzą z parkietu — wybierz cały nowy skład z ławki"
+                >
+                  <UserMinus className="w-3.5 h-3.5" />
+                  <span>Schodzi cała piątka</span>
                 </button>
               </div>
 
@@ -794,7 +844,16 @@ export const PlayerSelector: React.FC<PlayerSelectorProps> = ({
                     <div className="flex items-center gap-2">
                       <span className="w-2 h-2 rounded-full bg-amber-400 shrink-0" />
                       <span>
-                        {subCourtPlayerId && activeCourtTarget ? (
+                        {onCourtPlayers.length === 0 ? (
+                          <>
+                            Na parkiecie nikogo nie ma (<strong className="text-amber-400 font-mono">0/5</strong>). Wybierz poniżej z ławki rezerwowych nowy skład.
+                          </>
+                        ) : onCourtPlayers.length < 5 ? (
+                          <>
+                            Na parkiecie <strong className="text-amber-400 font-mono">{onCourtPlayers.length}/5</strong> — kliknij kolejnych{' '}
+                            <strong className="text-emerald-400">{5 - onCourtPlayers.length}</strong> graczy z ławki poniżej.
+                          </>
+                        ) : subCourtPlayerId && activeCourtTarget ? (
                           <>
                             Wybrano schodzącego:{' '}
                             <strong className="text-rose-400 font-mono">
@@ -811,7 +870,7 @@ export const PlayerSelector: React.FC<PlayerSelectorProps> = ({
                             . Teraz kliknij gracza z parkietu, którego zastępuje.
                           </>
                         ) : (
-                          'Kliknij zawodnika schodzącego (z parkietu) LUB wchodzącego (z ławki).'
+                          'Kliknij zawodnika schodzącego (z parkietu) LUB wchodzącego (z ławki), albo użyj „Schodzi cała piątka”.'
                         )}
                       </span>
                     </div>
@@ -831,90 +890,106 @@ export const PlayerSelector: React.FC<PlayerSelectorProps> = ({
 
                   {/* Section 1: NA PARKIECIE (On-Court Players) */}
                   <div>
-                    <div className="flex items-center justify-between mb-2">
+                    <div className="flex items-center justify-between gap-2 mb-2 flex-wrap">
                       <span className="text-xs font-black text-amber-400 uppercase tracking-wider flex items-center gap-1.5">
                         <UserMinus className="w-3.5 h-3.5 text-rose-400" />
-                        <span>1. Parkiet ({onCourtPlayers.length} graczy):</span>
+                        <span>1. Parkiet ({onCourtPlayers.length}/5):</span>
                       </span>
-                      <span className="text-[11px] text-slate-400">
-                        {subBenchPlayerId ? 'Kliknij, kogo zastępuje' : 'Dotknij, aby zmienić'}
+                      <span className="text-[11px] text-slate-400 hidden sm:inline">
+                        {subBenchPlayerId ? 'Kliknij, kogo zastępuje' : 'Dotknij, aby zmienić lub × aby zdjąć'}
                       </span>
                     </div>
 
-                    <div className="grid grid-cols-2 sm:grid-cols-5 gap-2">
-                      {onCourtPlayers.map((player) => {
-                        const isTargetedForSub = subCourtPlayerId === player.id;
-                        const stats = calculatePlayerStats(player, match.events, match);
+                    {onCourtPlayers.length === 0 ? (
+                      <div className="p-4 rounded-xl bg-slate-950 border border-dashed border-amber-500/40 text-center text-xs text-amber-300/90 font-semibold">
+                        Na parkiecie nikt nie zostaje (0/5). Wybierz poniżej cały nowy skład z ławki rezerwowych.
+                      </div>
+                    ) : (
+                      <div className="grid grid-cols-2 sm:grid-cols-5 gap-2">
+                        {onCourtPlayers.map((player) => {
+                          const isTargetedForSub = subCourtPlayerId === player.id;
+                          const stats = calculatePlayerStats(player, match.events, match);
 
-                        return (
-                          <button
-                            key={player.id}
-                            onClick={() => handleCourtPlayerClick(player.id)}
-                            className={`p-2.5 rounded-xl border text-center transition active:scale-95 flex flex-col justify-between ${
-                              isTargetedForSub
-                                ? 'bg-rose-500/25 border-rose-400 text-rose-200 ring-2 ring-rose-400/60 shadow-lg shadow-rose-950/40 scale-[1.02]'
-                                : subBenchPlayerId
-                                ? 'bg-slate-950 border-amber-500/50 hover:bg-rose-950/30 hover:border-rose-400 text-slate-200'
-                                : 'bg-slate-950 border-slate-800 text-slate-200 hover:bg-slate-800 hover:border-slate-700'
-                            }`}
-                          >
-                            <div className="flex items-center justify-between w-full mb-1">
-                              <span className="font-mono text-base font-black text-amber-400">
-                                #{player.number}
-                              </span>
-                              {isTargetedForSub && (
-                                <span className="text-[9px] font-black uppercase px-1.5 py-0.5 rounded bg-rose-500 text-white">
-                                  Schodzi ⬇
-                                </span>
-                              )}
-                              {subBenchPlayerId && !isTargetedForSub && (
-                                <span className="text-[9px] font-bold text-amber-300">
-                                  Zastąp ➔
-                                </span>
-                              )}
-                            </div>
-
-                            <div className="text-xs font-bold truncate max-w-full text-white my-0.5">
-                              {getCardPrimaryName(player)}
-                            </div>
-                            {getCardSecondaryName(player) && (
-                              <div className="text-[10px] text-slate-400 truncate max-w-full">
-                                {getCardSecondaryName(player)}
-                              </div>
-                            )}
-
-                            <div className="flex items-center justify-center gap-1.5 text-[10px] font-mono mt-1 pt-1 border-t border-slate-800/80">
-                              <span className="text-sky-300 font-bold">{formatSecondsToMMSS(stats.secondsPlayed)}</span>
-                              <span className="text-amber-300 font-bold">{stats.pts}p</span>
-                              <span
-                                className={`font-black ${
-                                  stats.plusMinus > 0
-                                    ? 'text-emerald-400'
-                                    : stats.plusMinus < 0
-                                    ? 'text-rose-400'
-                                    : 'text-slate-400'
-                                }`}
-                                title="Bilans +/-"
-                              >
-                                {stats.plusMinus > 0 ? `+${stats.plusMinus}` : stats.plusMinus}
-                              </span>
-                              <span
-                                className={`font-black ${
-                                  stats.eval > 0
-                                    ? 'text-emerald-400'
-                                    : stats.eval < 0
-                                    ? 'text-rose-400'
-                                    : 'text-slate-400'
+                          return (
+                            <div key={player.id} className="relative">
+                              <button
+                                type="button"
+                                onClick={() => handleCourtPlayerClick(player.id)}
+                                className={`w-full h-full p-2.5 rounded-xl border text-center transition active:scale-95 flex flex-col justify-between ${
+                                  isTargetedForSub
+                                    ? 'bg-rose-500/25 border-rose-400 text-rose-200 ring-2 ring-rose-400/60 shadow-lg shadow-rose-950/40 scale-[1.02]'
+                                    : subBenchPlayerId
+                                    ? 'bg-slate-950 border-amber-500/50 hover:bg-rose-950/30 hover:border-rose-400 text-slate-200'
+                                    : 'bg-slate-950 border-slate-800 text-slate-200 hover:bg-slate-800 hover:border-slate-700'
                                 }`}
                               >
-                                E:{stats.eval}
-                              </span>
-                              <span className="text-slate-400">{stats.fouls}F</span>
+                                <div className="flex items-center justify-between w-full mb-1 pr-6">
+                                  <span className="font-mono text-base font-black text-amber-400">
+                                    #{player.number}
+                                  </span>
+                                  {isTargetedForSub && (
+                                    <span className="text-[9px] font-black uppercase px-1.5 py-0.5 rounded bg-rose-500 text-white">
+                                      Schodzi ⬇
+                                    </span>
+                                  )}
+                                  {subBenchPlayerId && !isTargetedForSub && (
+                                    <span className="text-[9px] font-bold text-amber-300">
+                                      Zastąp ➔
+                                    </span>
+                                  )}
+                                </div>
+
+                                <div className="text-xs font-bold truncate max-w-full text-white my-0.5">
+                                  {getCardPrimaryName(player)}
+                                </div>
+                                {getCardSecondaryName(player) && (
+                                  <div className="text-[10px] text-slate-400 truncate max-w-full">
+                                    {getCardSecondaryName(player)}
+                                  </div>
+                                )}
+
+                                <div className="flex items-center justify-center gap-1.5 text-[10px] font-mono mt-1 pt-1 border-t border-slate-800/80">
+                                  <span className="text-sky-300 font-bold">{formatSecondsToMMSS(stats.secondsPlayed)}</span>
+                                  <span className="text-amber-300 font-bold">{stats.pts}p</span>
+                                  <span
+                                    className={`font-black ${
+                                      stats.plusMinus > 0
+                                        ? 'text-emerald-400'
+                                        : stats.plusMinus < 0
+                                        ? 'text-rose-400'
+                                        : 'text-slate-400'
+                                    }`}
+                                    title="Bilans +/-"
+                                  >
+                                    {stats.plusMinus > 0 ? `+${stats.plusMinus}` : stats.plusMinus}
+                                  </span>
+                                  <span
+                                    className={`font-black ${
+                                      stats.eval > 0
+                                        ? 'text-emerald-400'
+                                        : stats.eval < 0
+                                        ? 'text-rose-400'
+                                        : 'text-slate-400'
+                                    }`}
+                                  >
+                                    E:{stats.eval}
+                                  </span>
+                                  <span className="text-slate-400">{stats.fouls}F</span>
+                                </div>
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => handleRemoveSingleFromCourt(player.id)}
+                                className="absolute top-1.5 right-1.5 w-5 h-5 rounded-md bg-slate-900/90 hover:bg-rose-600 text-slate-300 hover:text-white border border-slate-700 flex items-center justify-center transition"
+                                title="Zdejmij z parkietu"
+                              >
+                                <X className="w-3 h-3" />
+                              </button>
                             </div>
-                          </button>
-                        );
-                      })}
-                    </div>
+                          );
+                        })}
+                      </div>
+                    )}
                   </div>
 
                   {/* Section 2: NA ŁAWCE (Bench Players) */}
@@ -997,6 +1072,10 @@ export const PlayerSelector: React.FC<PlayerSelectorProps> = ({
                                 <div className="shrink-0 p-1.5 rounded-lg bg-emerald-500/20 text-emerald-400 border border-emerald-500/40 text-[10px] font-bold">
                                   Wchodzi ➔
                                 </div>
+                              ) : onCourtPlayers.length < 5 ? (
+                                <div className="shrink-0 px-1.5 py-1 rounded-lg bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 text-[10px] font-bold">
+                                  + Wejdź
+                                </div>
                               ) : isTargetedForSub ? (
                                 <span className="text-[9px] font-black uppercase px-1.5 py-0.5 rounded bg-emerald-500 text-slate-950 shrink-0">
                                   Wchodzi ⬆
@@ -1041,7 +1120,7 @@ export const PlayerSelector: React.FC<PlayerSelectorProps> = ({
                       onClick={handleClearCourt}
                       className="text-[11px] text-rose-400 hover:text-rose-300 underline font-semibold"
                     >
-                      Wyczyść parkiet
+                      Schodzi cała piątka
                     </button>
                   </div>
 

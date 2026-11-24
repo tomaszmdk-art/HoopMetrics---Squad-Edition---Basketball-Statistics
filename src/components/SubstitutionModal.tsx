@@ -11,6 +11,8 @@ import {
   RefreshCw,
   SlidersHorizontal,
   RotateCcw,
+  UserMinus,
+  UserPlus,
 } from 'lucide-react';
 import { playClickSound, triggerHaptic } from '../services/tts';
 import { createSubstitutionEvent } from '../services/playerDisplay';
@@ -152,10 +154,94 @@ export const SubstitutionModal: React.FC<SubstitutionModalProps> = ({
       return;
     }
 
+    // Gdy na parkiecie jest mniej niż 5 zawodników (np. po kliknięciu "Schodzi cała piątka"),
+    // kliknięcie gracza z ławki od razu wprowadza go na boisko.
+    if (match.onCourtPlayerIds.length < 5) {
+      const targetPlayer = rosterPlayers.find((p) => p.id === playerId);
+      onUpdateMatch((prev) => {
+        if (prev.onCourtPlayerIds.includes(playerId) || prev.onCourtPlayerIds.length >= 5) {
+          return prev;
+        }
+        const nextOnCourt = [...prev.onCourtPlayerIds, playerId];
+        const subEvent = createSubstitutionEvent(prev, {
+          type: 'SUB_IN',
+          inPlayer: targetPlayer,
+          nextOnCourt,
+        });
+        return {
+          ...applyMatchLineupChange(prev, nextOnCourt),
+          events: [...prev.events, subEvent],
+          updatedAt: Date.now(),
+        };
+      });
+      if (!selectedPlayerId) {
+        onSelectPlayer(playerId);
+      }
+      if (targetPlayer) {
+        setLastSwapMessage(`Wszedł na parkiet: ${formatNumAndName(targetPlayer)}`);
+      }
+      setSubBenchPlayerId(null);
+      return;
+    }
+
     if (subBenchPlayerId === playerId) {
       setSubBenchPlayerId(null);
     } else {
       setSubBenchPlayerId(playerId);
+    }
+  };
+
+  const handleClearCourt = () => {
+    if (match.onCourtPlayerIds.length === 0) return;
+    playClickSound();
+    triggerHaptic(45);
+
+    onUpdateMatch((prev) => {
+      const subEvents = prev.onCourtPlayerIds.map((id) =>
+        createSubstitutionEvent(prev, {
+          type: 'SUB_OUT',
+          outPlayer: rosterPlayers.find((p) => p.id === id),
+          nextOnCourt: [],
+        })
+      );
+      return {
+        ...applyMatchLineupChange(prev, []),
+        events: [...prev.events, ...subEvents],
+        updatedAt: Date.now(),
+      };
+    });
+
+    onSelectPlayer(null);
+    setSubCourtPlayerId(null);
+    setSubBenchPlayerId(null);
+    setLastSwapMessage('Zeszła cała piątka (0/5). Wybierz nowy skład z ławki rezerwowych.');
+  };
+
+  const handleRemoveSingleFromCourt = (playerId: string) => {
+    playClickSound();
+    triggerHaptic(20);
+    const targetPlayer = rosterPlayers.find((p) => p.id === playerId);
+
+    onUpdateMatch((prev) => {
+      if (!prev.onCourtPlayerIds.includes(playerId)) return prev;
+      const nextOnCourt = prev.onCourtPlayerIds.filter((id) => id !== playerId);
+      const subEvent = createSubstitutionEvent(prev, {
+        type: 'SUB_OUT',
+        outPlayer: targetPlayer,
+        nextOnCourt,
+      });
+      return {
+        ...applyMatchLineupChange(prev, nextOnCourt),
+        events: [...prev.events, subEvent],
+        updatedAt: Date.now(),
+      };
+    });
+
+    if (selectedPlayerId === playerId) {
+      onSelectPlayer(null);
+    }
+    if (subCourtPlayerId === playerId) {
+      setSubCourtPlayerId(null);
     }
   };
 
@@ -221,7 +307,6 @@ export const SubstitutionModal: React.FC<SubstitutionModalProps> = ({
     onUpdateMatch((prev) => {
       const current = prev.onCourtPlayerIds;
       if (current.includes(playerId)) {
-        if (current.length <= 1) return prev;
         const nextOnCourt = current.filter((id) => id !== playerId);
         const subEvent = createSubstitutionEvent(prev, {
           type: 'SUB_OUT',
@@ -309,8 +394,8 @@ export const SubstitutionModal: React.FC<SubstitutionModalProps> = ({
         </div>
 
         {/* Mode Switcher Tabs */}
-        <div className="flex items-center justify-between gap-2 px-3.5 sm:px-4 pt-3 pb-2 border-b border-slate-800/80 bg-slate-900">
-          <div className="flex items-center gap-1.5">
+        <div className="flex items-center justify-between gap-2 flex-wrap px-3.5 sm:px-4 pt-3 pb-2 border-b border-slate-800/80 bg-slate-900">
+          <div className="flex items-center gap-1.5 flex-wrap">
             <button
               onClick={() => {
                 playClickSound();
@@ -340,6 +425,21 @@ export const SubstitutionModal: React.FC<SubstitutionModalProps> = ({
               <SlidersHorizontal className="w-3.5 h-3.5" />
               <span>Zaznacz całą piątkę ({match.onCourtPlayerIds.length}/5)</span>
             </button>
+
+            <button
+              type="button"
+              disabled={onCourtPlayers.length === 0}
+              onClick={handleClearCourt}
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-black border transition ${
+                onCourtPlayers.length > 0
+                  ? 'bg-rose-500/20 hover:bg-rose-500/30 text-rose-300 border-rose-500/40 active:scale-95'
+                  : 'bg-slate-800/50 text-slate-600 border-slate-800 cursor-not-allowed'
+              }`}
+              title="Wszyscy zawodnicy schodzą z parkietu — wybierz całą nową piątkę z ławki"
+            >
+              <UserMinus className="w-3.5 h-3.5" />
+              <span>Schodzi cała piątka</span>
+            </button>
           </div>
 
           {benchPlayers.length >= 5 && subMode === 'rotation' && (
@@ -368,57 +468,104 @@ export const SubstitutionModal: React.FC<SubstitutionModalProps> = ({
         <div className="flex-1 overflow-y-auto p-3.5 sm:p-5 space-y-4">
           {subMode === 'rotation' ? (
             <div className="space-y-4">
+              {/* Helper / Status */}
+              <div className="p-2.5 rounded-xl bg-slate-950 border border-slate-800 text-xs text-slate-300 flex items-center justify-between gap-2">
+                <span>
+                  {onCourtPlayers.length === 0 ? (
+                    <>
+                      Na parkiecie nikogo nie ma (<strong className="text-amber-400 font-mono">0/5</strong>) — wybierz z ławki rezerwowych 5 nowych zawodników.
+                    </>
+                  ) : onCourtPlayers.length < 5 ? (
+                    <>
+                      Na parkiecie <strong className="text-amber-400 font-mono">{onCourtPlayers.length}/5</strong> — kliknij kolejnych{' '}
+                      <strong className="text-emerald-400">{5 - onCourtPlayers.length}</strong> z ławki rezerwowych.
+                    </>
+                  ) : subCourtPlayerId && activeCourtTarget ? (
+                    <>
+                      Schodzi: <strong className="text-rose-400 font-mono">{formatNumAndName(activeCourtTarget)}</strong> — wybierz zmiennika z ławki.
+                    </>
+                  ) : subBenchPlayerId && activeBenchTarget ? (
+                    <>
+                      Wchodzi: <strong className="text-emerald-400 font-mono">{formatNumAndName(activeBenchTarget)}</strong> — kliknij kogo zastępuje.
+                    </>
+                  ) : (
+                    'Kliknij gracza na parkiecie i z ławki (1 na 1) lub użyj „Schodzi cała piątka”.'
+                  )}
+                </span>
+              </div>
+
               {/* Parkiet (On-court) */}
               <div>
-                <span className="text-xs font-black uppercase tracking-wider text-amber-400 mb-2 block">
-                  1. Zawodnicy na parkiecie ({onCourtPlayers.length}/5):
-                </span>
-                <div className="grid grid-cols-2 sm:grid-cols-5 gap-2">
-                  {onCourtPlayers.map((player) => {
-                    const isTarget = subCourtPlayerId === player.id;
-                    const stats = calculatePlayerStats(player, match.events, match);
-
-                    return (
-                      <button
-                        key={player.id}
-                        onClick={() => handleCourtPlayerClick(player.id)}
-                        className={`p-2.5 rounded-xl text-left border transition active:scale-95 relative flex flex-col justify-between ${
-                          isTarget
-                            ? 'bg-rose-500/25 border-rose-500 ring-2 ring-rose-400'
-                            : 'bg-slate-800 hover:bg-slate-750 border-slate-700 text-slate-200'
-                        }`}
-                      >
-                        <div className="flex items-center justify-between">
-                          <span className="font-mono font-black text-amber-400 text-lg">
-                            #{player.number}
-                          </span>
-                          <span className="text-[10px] font-mono text-slate-400">
-                            <span className="text-sky-300">{formatSecondsToMMSS(stats.secondsPlayed)}</span> • {stats.pts}p | {stats.fouls}F
-                          </span>
-                        </div>
-                        <div className="font-bold text-xs text-white truncate mt-1">
-                          {getCardPrimaryName(player)}
-                        </div>
-                        {getCardSecondaryName(player) && (
-                          <div className="text-[10px] text-slate-400 truncate">
-                            {getCardSecondaryName(player)}
-                          </div>
-                        )}
-                        {isTarget && (
-                          <span className="mt-1.5 text-[9px] font-bold text-rose-300 uppercase block">
-                            Wybrano do zejścia
-                          </span>
-                        )}
-                      </button>
-                    );
-                  })}
+                <div className="flex items-center justify-between gap-2 mb-2 flex-wrap">
+                  <span className="text-xs font-black uppercase tracking-wider text-amber-400 flex items-center gap-1.5">
+                    <UserMinus className="w-3.5 h-3.5 text-rose-400" />
+                    <span>1. Zawodnicy na parkiecie ({onCourtPlayers.length}/5):</span>
+                  </span>
                 </div>
+
+                {onCourtPlayers.length === 0 ? (
+                  <div className="p-4 rounded-xl bg-slate-950 border border-dashed border-amber-500/40 text-center text-xs text-amber-300/90 font-semibold">
+                    Na parkiecie nikt nie zostaje (0/5). Wybierz poniżej cały nowy skład z ławki rezerwowych.
+                  </div>
+                ) : (
+                  <div className="grid grid-cols-2 sm:grid-cols-5 gap-2">
+                    {onCourtPlayers.map((player) => {
+                      const isTarget = subCourtPlayerId === player.id;
+                      const stats = calculatePlayerStats(player, match.events, match);
+
+                      return (
+                        <div key={player.id} className="relative">
+                          <button
+                            type="button"
+                            onClick={() => handleCourtPlayerClick(player.id)}
+                            className={`w-full h-full p-2.5 rounded-xl text-left border transition active:scale-95 flex flex-col justify-between ${
+                              isTarget
+                                ? 'bg-rose-500/25 border-rose-500 ring-2 ring-rose-400'
+                                : 'bg-slate-800 hover:bg-slate-750 border-slate-700 text-slate-200'
+                            }`}
+                          >
+                            <div className="flex items-center justify-between pr-6">
+                              <span className="font-mono font-black text-amber-400 text-lg">
+                                #{player.number}
+                              </span>
+                              <span className="text-[10px] font-mono text-slate-400">
+                                <span className="text-sky-300">{formatSecondsToMMSS(stats.secondsPlayed)}</span> • {stats.pts}p | {stats.fouls}F
+                              </span>
+                            </div>
+                            <div className="font-bold text-xs text-white truncate mt-1">
+                              {getCardPrimaryName(player)}
+                            </div>
+                            {getCardSecondaryName(player) && (
+                              <div className="text-[10px] text-slate-400 truncate">
+                                {getCardSecondaryName(player)}
+                              </div>
+                            )}
+                            {isTarget && (
+                              <span className="mt-1.5 text-[9px] font-bold text-rose-300 uppercase block">
+                                Wybrano do zejścia
+                              </span>
+                            )}
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handleRemoveSingleFromCourt(player.id)}
+                            className="absolute top-1.5 right-1.5 w-5 h-5 rounded-md bg-slate-900/90 hover:bg-rose-600 text-slate-300 hover:text-white border border-slate-700 flex items-center justify-center transition"
+                            title="Zdejmij z parkietu"
+                          >
+                            <X className="w-3 h-3" />
+                          </button>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
               </div>
 
               {/* Ławka (Bench) */}
               <div>
-                <span className="text-xs font-black uppercase tracking-wider text-emerald-400 mb-2 block">
-                  2. Ławka rezerwowych ({benchPlayers.length}):
+                <span className="text-xs font-black uppercase tracking-wider text-emerald-400 mb-2 flex items-center gap-1.5">
+                  <UserPlus className="w-3.5 h-3.5 text-emerald-400" />
+                  <span>2. Ławka rezerwowych ({benchPlayers.length}):</span>
                 </span>
                 {benchPlayers.length === 0 ? (
                   <p className="text-xs text-slate-500 italic p-3 rounded-xl bg-slate-950">
@@ -437,6 +584,8 @@ export const SubstitutionModal: React.FC<SubstitutionModalProps> = ({
                           className={`p-2.5 rounded-xl text-left border transition active:scale-95 relative flex flex-col justify-between ${
                             isTarget
                               ? 'bg-emerald-500/25 border-emerald-500 ring-2 ring-emerald-400'
+                              : onCourtPlayers.length < 5
+                              ? 'bg-slate-950 hover:bg-emerald-950/30 border-emerald-500/50 text-slate-200'
                               : 'bg-slate-950 hover:bg-slate-800 border-slate-800 text-slate-300'
                           }`}
                         >
@@ -456,11 +605,15 @@ export const SubstitutionModal: React.FC<SubstitutionModalProps> = ({
                               {getCardSecondaryName(player)}
                             </div>
                           )}
-                          {isTarget && (
+                          {onCourtPlayers.length < 5 && !subCourtPlayerId ? (
+                            <span className="mt-1.5 text-[9px] font-bold text-emerald-400 uppercase block">
+                              + Wchodzi na parkiet
+                            </span>
+                          ) : isTarget ? (
                             <span className="mt-1.5 text-[9px] font-bold text-emerald-300 uppercase block">
                               Wybrano do wejścia
                             </span>
-                          )}
+                          ) : null}
                         </button>
                       );
                     })}
@@ -506,13 +659,22 @@ export const SubstitutionModal: React.FC<SubstitutionModalProps> = ({
           ) : (
             /* LINEUP PICKER MODE */
             <div className="space-y-3">
-              <div className="p-3 rounded-xl bg-slate-950 border border-slate-800 text-xs text-slate-300 flex items-center justify-between">
+              <div className="p-3 rounded-xl bg-slate-950 border border-slate-800 text-xs text-slate-300 flex items-center justify-between gap-2">
                 <span>
                   Wybierz dokładnie 5 zawodników, którzy mają grać na parkiecie:{' '}
                   <strong className="text-amber-400 font-mono text-sm">
                     {match.onCourtPlayerIds.length}/5
                   </strong>
                 </span>
+                {match.onCourtPlayerIds.length > 0 && (
+                  <button
+                    type="button"
+                    onClick={handleClearCourt}
+                    className="text-[11px] text-rose-400 hover:text-rose-300 underline font-semibold shrink-0"
+                  >
+                    Schodzi cała piątka
+                  </button>
+                )}
               </div>
 
               <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
