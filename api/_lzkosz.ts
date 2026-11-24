@@ -1,5 +1,3 @@
-import { URL } from 'url';
-
 export interface LzkoszClubSummary {
   id: number;
   name: string;
@@ -75,8 +73,10 @@ export interface LzkoszClubRedirectResponse {
 
 const MAX_HTML_BYTES = 5 * 1024 * 1024;
 const MAX_IMAGE_BYTES = 1500 * 1024;
-const PAGE_TIMEOUT_MS = 12000;
-const IMAGE_TIMEOUT_MS = 6000;
+const IS_VERCEL = Boolean(process.env.VERCEL);
+const PAGE_TIMEOUT_MS = IS_VERCEL ? 8000 : 12000;
+const IMAGE_TIMEOUT_MS = IS_VERCEL ? 3500 : 5000;
+const PHOTO_BATCH_BUDGET_MS = IS_VERCEL ? 4500 : 9000;
 const CLUBS_CACHE_TTL_MS = 30 * 60 * 1000;
 
 let clubsCache: { fetchedAt: number; seasonName: string; clubs: LzkoszClubSummary[] } | null = null;
@@ -198,7 +198,8 @@ async function safeFetchWithAllowlist(
       redirect: 'manual',
       signal: AbortSignal.timeout(options.timeoutMs),
       headers: {
-        'User-Agent': 'BasketStatsPro-RosterImporter/1.0 (+https://lzkosz.pl)',
+        'User-Agent':
+          'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
         Accept: options.accept,
         'Accept-Language': 'pl-PL,pl;q=0.9,en;q=0.8',
       },
@@ -821,10 +822,11 @@ export async function previewLzkoszTeam(
   const photosTotal = parsedDrafts.filter((d) => Boolean(d.photoUrl)).length;
 
   if (includePhotos) {
+    const deadlineAt = Date.now() + PHOTO_BATCH_BUDGET_MS;
     const [resolvedLogo, resolvedPhotos] = await Promise.all([
       remoteLogoUrl ? fetchAllowedImageAsDataUrl(remoteLogoUrl) : Promise.resolve(undefined),
       mapWithConcurrency(parsedDrafts, 6, async (draft) => {
-        if (!draft.photoUrl) return undefined;
+        if (!draft.photoUrl || Date.now() >= deadlineAt) return undefined;
         return fetchAllowedImageAsDataUrl(draft.photoUrl);
       }),
     ]);
@@ -843,7 +845,7 @@ export async function previewLzkoszTeam(
           number: draft.assignedNumber ?? 0,
           position: draft.position,
           notes: draft.notes,
-          photo: dataPhoto,
+          photo: dataPhoto || draft.photoUrl,
           photoUrl: draft.photoUrl,
           createdAt: now + i,
         };

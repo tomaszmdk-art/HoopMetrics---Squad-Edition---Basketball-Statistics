@@ -179,7 +179,7 @@ export function buildImportPreviewFromLzkosz(
     number: Number.isFinite(p.number) ? p.number : 0,
     position: p.position || 'SG',
     notes: p.notes || undefined,
-    photo: isSafeDisplayImageSrc(p.photo),
+    photo: isSafeDisplayImageSrc(p.photo) || isSafeDisplayImageSrc(p.photoUrl),
     createdAt: p.createdAt || Date.now(),
   }));
 

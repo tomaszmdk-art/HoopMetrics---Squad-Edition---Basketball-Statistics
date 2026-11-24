@@ -9,7 +9,7 @@ import {
   getLzkoszClubs,
   getLzkoszClubTeams,
   previewLzkoszTeam,
-} from './lzkoszService.js';
+} from './_lzkosz.js';
 
 dotenv.config();
 
@@ -1202,6 +1202,7 @@ Zwróć TYLKO poprawny JSON (bez markdown) w formacie:
       res.setHeader('Cache-Control', 'public, max-age=300');
       res.json(data);
     } catch (err: unknown) {
+      res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
       const msg = err instanceof Error ? err.message : 'Nie udało się pobrać listy klubów ŁZKosz.pl';
       res.status(422).json({ error: msg });
     }
