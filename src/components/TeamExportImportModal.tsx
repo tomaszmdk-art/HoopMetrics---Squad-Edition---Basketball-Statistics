@@ -15,6 +15,14 @@ import {
 import { playClickSound, triggerHaptic } from '../services/tts';
 import { getPlayerShortName } from '../services/playerDisplay';
 import {
+  fetchLzkoszClubs,
+  fetchLzkoszClubTeams,
+  fetchLzkoszTeamPreview,
+  buildImportPreviewFromLzkosz,
+  LzkoszClubSummary,
+  LzkoszClubTeamOption,
+} from '../services/lzkoszImportService';
+import {
   Download,
   Upload,
   Mail,
@@ -33,9 +41,12 @@ import {
   FileCheck,
   Sparkles,
   Info,
-  Calendar,
   Layers,
-  ExternalLink,
+  Globe,
+  Search,
+  Loader2,
+  Building2,
+  ChevronRight,
 } from 'lucide-react';
 
 interface TeamExportImportModalProps {
@@ -76,6 +87,7 @@ export const TeamExportImportModal: React.FC<TeamExportImportModalProps> = ({
   const [showEmailPreview, setShowEmailPreview] = useState<boolean>(false);
 
   // Import State
+  const [importSource, setImportSource] = useState<'lzkosz' | 'json'>(readOnly ? 'json' : 'lzkosz');
   const [importJsonText, setImportJsonText] = useState<string>('');
   const [importPreview, setImportPreview] = useState<ImportPreviewResult | null>(null);
   const [importMode, setImportMode] = useState<'merge' | 'overwrite'>('merge');
@@ -84,17 +96,60 @@ export const TeamExportImportModal: React.FC<TeamExportImportModalProps> = ({
   const [importErrorMsg, setImportErrorMsg] = useState<string | null>(null);
   const [isDragOver, setIsDragOver] = useState<boolean>(false);
 
+  // ŁZKosz Import State
+  const [lzkoszUrl, setLzkoszUrl] = useState<string>('');
+  const [lzkoszIncludePhotos, setLzkoszIncludePhotos] = useState<boolean>(true);
+  const [isFetchingLzkoszTeam, setIsFetchingLzkoszTeam] = useState<boolean>(false);
+  const [lzkoszClubs, setLzkoszClubs] = useState<LzkoszClubSummary[]>([]);
+  const [isLoadingClubs, setIsLoadingClubs] = useState<boolean>(false);
+  const [clubsLoadError, setClubsLoadError] = useState<string | null>(null);
+  const [clubSearchQuery, setClubSearchQuery] = useState<string>('');
+  const [selectedClub, setSelectedClub] = useState<{ id: string; name: string; city: string } | null>(null);
+  const [clubTeams, setClubTeams] = useState<LzkoszClubTeamOption[]>([]);
+  const [isLoadingClubTeams, setIsLoadingClubTeams] = useState<boolean>(false);
+
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   // When modal opens, sync default tab
   useEffect(() => {
     if (isOpen) {
       setActiveTab(readOnly ? 'import' : defaultTab);
+      setImportSource(readOnly ? 'json' : 'lzkosz');
       setImportSuccessMsg(null);
       setImportErrorMsg(null);
       setExportSuccessMessage(null);
     }
   }, [isOpen, defaultTab, readOnly]);
+
+  // Lazy-load ŁZKosz clubs list when user switches to ŁZKosz import
+  useEffect(() => {
+    if (!isOpen || activeTab !== 'import' || importSource !== 'lzkosz') return;
+    if (lzkoszClubs.length > 0 || isLoadingClubs) return;
+
+    let cancelled = false;
+    setIsLoadingClubs(true);
+    setClubsLoadError(null);
+    fetchLzkoszClubs()
+      .then((res) => {
+        if (!cancelled) {
+          setLzkoszClubs(res.clubs || []);
+        }
+      })
+      .catch((err: unknown) => {
+        if (!cancelled) {
+          setClubsLoadError(
+            (err as Error)?.message || 'Nie udało się pobrać listy klubów z lzkosz.pl.'
+          );
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setIsLoadingClubs(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [isOpen, activeTab, importSource, lzkoszClubs.length, isLoadingClubs]);
 
   if (!isOpen) return null;
 
@@ -249,7 +304,9 @@ export const TeamExportImportModal: React.FC<TeamExportImportModalProps> = ({
       setImportSuccessMsg(
         readOnly
           ? `Sukces! Zapisano lokalnie na tym urządzeniu: ${result.importedPlayersCount} zawodników (${result.importedPhotosCount} ze zdjęciami). Dane osobowe nie są wysyłane na serwer.`
-          : `Sukces! Zaimportowano: ${result.importedPlayersCount} zawodników (${result.importedPhotosCount} ze zdjęciami), ${result.importedMatchesCount} meczów oraz zaktualizowano dane klubu "${result.updatedClub.name}".`
+          : importPreview.exportType === 'lzkosz'
+            ? `Sukces! Zaimportowano z ŁZKosz.pl: ${result.importedPlayersCount} zawodników (${result.importedPhotosCount} ze zdjęciami) oraz zaktualizowano dane klubu "${result.updatedClub.name}".`
+            : `Sukces! Zaimportowano: ${result.importedPlayersCount} zawodników (${result.importedPhotosCount} ze zdjęciami), ${result.importedMatchesCount} meczów oraz zaktualizowano dane klubu "${result.updatedClub.name}".`
       );
       setImportPreview(null);
       setImportJsonText('');
@@ -259,6 +316,82 @@ export const TeamExportImportModal: React.FC<TeamExportImportModalProps> = ({
       setIsImporting(false);
     }
   };
+
+  // ŁZKosz Import: Fetch team preview by URL
+  const handleFetchLzkoszTeam = async (targetUrl?: string) => {
+    const urlToLoad = (targetUrl ?? lzkoszUrl).trim();
+    if (!urlToLoad) {
+      setImportErrorMsg('Wklej adres strony drużyny na lzkosz.pl lub wybierz klub z listy.');
+      return;
+    }
+
+    playClickSound();
+    triggerHaptic(30);
+    setIsFetchingLzkoszTeam(true);
+    setImportErrorMsg(null);
+    setImportSuccessMsg(null);
+    setImportPreview(null);
+
+    try {
+      const response = await fetchLzkoszTeamPreview(urlToLoad, lzkoszIncludePhotos);
+      if (response.kind === 'club') {
+        setSelectedClub({
+          id: response.clubId,
+          name: response.clubName,
+          city: response.city,
+        });
+        setClubTeams(response.teams || []);
+        if (!response.teams || response.teams.length === 0) {
+          setImportErrorMsg(`Klub "${response.clubName}" nie ma przypisanych aktywnych drużyn w bieżącym sezonie.`);
+        }
+        return;
+      }
+
+      const preview = buildImportPreviewFromLzkosz(response, clubProfile);
+      setImportPreview(preview);
+    } catch (err: unknown) {
+      setImportErrorMsg(
+        (err as Error)?.message || 'Nie udało się pobrać składu drużyny z lzkosz.pl.'
+      );
+    } finally {
+      setIsFetchingLzkoszTeam(false);
+    }
+  };
+
+  // ŁZKosz Import: Select club from directory to load its teams
+  const handleSelectLzkoszClub = async (club: LzkoszClubSummary) => {
+    playClickSound();
+    triggerHaptic(25);
+    setSelectedClub({ id: String(club.id), name: club.name, city: club.city });
+    setClubTeams([]);
+    setIsLoadingClubTeams(true);
+    setImportErrorMsg(null);
+    setImportSuccessMsg(null);
+
+    try {
+      const data = await fetchLzkoszClubTeams(club.id);
+      setClubTeams(data.teams || []);
+      if (!data.teams || data.teams.length === 0) {
+        setImportErrorMsg(`Nie znaleziono aktywnych drużyn dla klubu "${club.name}".`);
+      }
+    } catch (err: unknown) {
+      setImportErrorMsg(
+        (err as Error)?.message || 'Nie udało się pobrać listy drużyn tego klubu.'
+      );
+    } finally {
+      setIsLoadingClubTeams(false);
+    }
+  };
+
+  const filteredLzkoszClubs = lzkoszClubs.filter((c) => {
+    const q = clubSearchQuery.trim().toLowerCase();
+    if (!q) return true;
+    return (
+      c.name.toLowerCase().includes(q) ||
+      (c.licenceName && c.licenceName.toLowerCase().includes(q)) ||
+      c.city.toLowerCase().includes(q)
+    );
+  });
 
   const hasNativeShareSupport = canShareFiles();
 
@@ -326,7 +459,7 @@ export const TeamExportImportModal: React.FC<TeamExportImportModalProps> = ({
               }`}
             >
               <Upload className="w-4 h-4" />
-              <span>2. Importuj Drużynę (Plik JSON)</span>
+              <span>2. Importuj Drużynę (ŁZKosz.pl / JSON)</span>
             </button>
           </div>
         )}
@@ -588,80 +721,332 @@ export const TeamExportImportModal: React.FC<TeamExportImportModalProps> = ({
                   </div>
                 </div>
               )}
-              {/* File upload drag and drop zone */}
-              <div
-                onDragOver={handleDragOver}
-                onDragLeave={handleDragLeave}
-                onDrop={handleDrop}
-                onClick={() => fileInputRef.current?.click()}
-                className={`p-6 sm:p-8 rounded-2xl border-2 border-dashed text-center cursor-pointer transition select-none ${
-                  isDragOver
-                    ? 'border-emerald-400 bg-emerald-950/30 text-emerald-200'
-                    : 'border-slate-700 bg-slate-950/60 hover:border-slate-500 text-slate-400 hover:text-slate-200'
-                }`}
-              >
-                <input
-                  type="file"
-                  ref={fileInputRef}
-                  onChange={(e) => {
-                    const file = e.target.files?.[0];
-                    if (file) handleFileSelect(file);
+              {/* Import Source Switcher */}
+              <div className="grid grid-cols-2 gap-2 p-1 rounded-2xl bg-slate-950 border border-slate-800">
+                <button
+                  type="button"
+                  onClick={() => {
+                    playClickSound();
+                    setImportSource('lzkosz');
+                    setImportErrorMsg(null);
                   }}
-                  accept=".json,application/json"
-                  className="hidden"
-                />
-                <FileJson className="w-12 h-12 mx-auto mb-2 text-emerald-400 opacity-80" />
-                <h4 className="text-sm sm:text-base font-bold text-white mb-1">
-                  Kliknij lub przeciągnij plik kopii zapasowej (.json)
-                </h4>
-                <p className="text-xs text-slate-400 max-w-md mx-auto">
-                  Obsługuje pełny eksport drużyny: dane klubu, zdjęcia zawodników w wysokiej rozdzielczości oraz wszystkie protokoły meczowe.
-                </p>
+                  className={`py-2 px-3 rounded-xl text-xs font-bold flex items-center justify-center gap-2 transition ${
+                    importSource === 'lzkosz'
+                      ? 'bg-sky-500/20 text-sky-300 border border-sky-500/40 shadow-sm'
+                      : 'text-slate-400 hover:text-white hover:bg-slate-900'
+                  }`}
+                >
+                  <Globe className="w-4 h-4" />
+                  <span>Import ze strony ŁZKosz.pl</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    playClickSound();
+                    setImportSource('json');
+                    setImportErrorMsg(null);
+                  }}
+                  className={`py-2 px-3 rounded-xl text-xs font-bold flex items-center justify-center gap-2 transition ${
+                    importSource === 'json'
+                      ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 shadow-sm'
+                      : 'text-slate-400 hover:text-white hover:bg-slate-900'
+                  }`}
+                >
+                  <FileJson className="w-4 h-4" />
+                  <span>Import z pliku JSON</span>
+                </button>
               </div>
 
-              {/* Direct Paste JSON Textarea Toggle */}
-              <div className="space-y-1">
-                <details className="group">
-                  <summary className="text-[11px] font-semibold text-slate-400 hover:text-white cursor-pointer select-none">
-                    ▶ Lub wklej zawartość tekstową JSON ze schowka
-                  </summary>
-                  <div className="pt-2 space-y-2">
-                    <textarea
-                      value={importJsonText}
-                      onChange={(e) => {
-                        const val = e.target.value;
-                        setImportJsonText(val);
-                        if (val.trim()) {
-                          const preview = inspectImportJson(val);
-                          setImportPreview(preview);
-                          if (!preview.valid) setImportErrorMsg(preview.error || 'Błąd formatu');
-                          else setImportErrorMsg(null);
-                        } else {
-                          setImportPreview(null);
-                        }
-                      }}
-                      placeholder="Wklej tutaj kod JSON..."
-                      rows={4}
-                      className="w-full bg-slate-950 border border-slate-800 rounded-xl p-2.5 text-xs text-white font-mono focus:outline-none focus:border-emerald-500"
-                    />
+              {/* SOURCE A: ŁZKOSZ.PL */}
+              {importSource === 'lzkosz' && (
+                <div className="space-y-3">
+                  {/* Direct Team Link Box */}
+                  <div className="p-4 rounded-2xl bg-slate-950/80 border border-sky-500/30 space-y-3">
+                    <div className="flex items-center justify-between gap-2 flex-wrap">
+                      <div className="flex items-center gap-2">
+                        <Globe className="w-4 h-4 text-sky-400 shrink-0" />
+                        <span className="font-bold text-white text-xs sm:text-sm">
+                          Wklej link do drużyny na lzkosz.pl
+                        </span>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const sample = 'https://lzkosz.pl/liga/232/sezon/29/d/11203/uks-akademia-gortata';
+                          setLzkoszUrl(sample);
+                          handleFetchLzkoszTeam(sample);
+                        }}
+                        className="text-[11px] font-semibold text-sky-400 hover:text-sky-300 underline"
+                      >
+                        Przykład: UKS Akademia Gortata (U15M)
+                      </button>
+                    </div>
+
+                    <div className="flex flex-col sm:flex-row gap-2">
+                      <input
+                        type="url"
+                        value={lzkoszUrl}
+                        onChange={(e) => setLzkoszUrl(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') {
+                            e.preventDefault();
+                            handleFetchLzkoszTeam();
+                          }
+                        }}
+                        placeholder="https://lzkosz.pl/liga/232/sezon/29/d/11203/uks-akademia-gortata"
+                        className="flex-1 bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-sky-500 font-mono"
+                      />
+                      <button
+                        type="button"
+                        disabled={isFetchingLzkoszTeam}
+                        onClick={() => handleFetchLzkoszTeam()}
+                        className="px-4 py-2 rounded-xl bg-gradient-to-r from-sky-500 to-cyan-500 hover:from-sky-400 hover:to-cyan-400 text-slate-950 font-black text-xs flex items-center justify-center gap-1.5 transition active:scale-95 disabled:opacity-50 shrink-0"
+                      >
+                        {isFetchingLzkoszTeam ? (
+                          <Loader2 className="w-4 h-4 animate-spin" />
+                        ) : (
+                          <Download className="w-4 h-4" />
+                        )}
+                        <span>{isFetchingLzkoszTeam ? 'Pobieranie...' : 'Pobierz skład'}</span>
+                      </button>
+                    </div>
+
+                    <label className="flex items-center gap-2 cursor-pointer select-none text-[11px] text-slate-300 hover:text-white">
+                      <input
+                        type="checkbox"
+                        checked={lzkoszIncludePhotos}
+                        onChange={(e) => setLzkoszIncludePhotos(e.target.checked)}
+                        className="w-3.5 h-3.5 accent-sky-500 rounded cursor-pointer"
+                      />
+                      <Camera className="w-3.5 h-3.5 text-sky-400" />
+                      <span>Pobierz zdjęcia zawodników i herb klubu (do pracy offline i eksportu PDF)</span>
+                    </label>
                   </div>
-                </details>
-              </div>
 
-              {/* Import Preview Card (When file or text is loaded and valid) */}
+                  {/* Club Browser from ŁZKosz.pl */}
+                  <div className="p-4 rounded-2xl bg-slate-950/80 border border-slate-800 space-y-3">
+                    <div className="flex items-center justify-between gap-2 flex-wrap">
+                      <div className="flex items-center gap-2">
+                        <Building2 className="w-4 h-4 text-amber-400 shrink-0" />
+                        <span className="font-bold text-white text-xs sm:text-sm">
+                          Lub wybierz klub z listy ŁZKosz.pl
+                        </span>
+                      </div>
+                      {lzkoszClubs.length > 0 && (
+                        <span className="text-[11px] text-slate-400 font-mono">
+                          {lzkoszClubs.length} klubów
+                        </span>
+                      )}
+                    </div>
+
+                    <div className="relative">
+                      <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-slate-500" />
+                      <input
+                        type="text"
+                        value={clubSearchQuery}
+                        onChange={(e) => setClubSearchQuery(e.target.value)}
+                        placeholder="Szukaj klubu po nazwie lub mieście (np. Akademia Gortata, Widzew, ŁKS, Pabianice)..."
+                        className="w-full bg-slate-900 border border-slate-700 rounded-xl pl-9 pr-3 py-2 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-amber-500"
+                      />
+                    </div>
+
+                    {isLoadingClubs && (
+                      <div className="py-4 text-center text-xs text-slate-400 flex items-center justify-center gap-2">
+                        <Loader2 className="w-4 h-4 animate-spin text-sky-400" />
+                        <span>Wczytywanie listy klubów ŁZKosz.pl...</span>
+                      </div>
+                    )}
+
+                    {clubsLoadError && (
+                      <div className="p-2.5 rounded-xl bg-rose-950/50 border border-rose-500/30 text-rose-300 text-xs flex items-center justify-between gap-2">
+                        <span>{clubsLoadError}</span>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setLzkoszClubs([]);
+                            setClubsLoadError(null);
+                          }}
+                          className="px-2 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-white font-bold text-[11px]"
+                        >
+                          Ponów
+                        </button>
+                      </div>
+                    )}
+
+                    {!isLoadingClubs && lzkoszClubs.length > 0 && (
+                      <div className="max-h-44 overflow-y-auto space-y-1 pr-1">
+                        {filteredLzkoszClubs.length === 0 ? (
+                          <div className="py-3 text-center text-xs text-slate-500">
+                            Brak klubów pasujących do wyszukiwania.
+                          </div>
+                        ) : (
+                          filteredLzkoszClubs.map((club) => {
+                            const isSelected = selectedClub?.id === String(club.id);
+                            return (
+                              <button
+                                key={club.id}
+                                type="button"
+                                onClick={() => handleSelectLzkoszClub(club)}
+                                className={`w-full text-left px-3 py-2 rounded-xl border transition flex items-center justify-between gap-2 ${
+                                  isSelected
+                                    ? 'bg-amber-500/15 border-amber-500/50 text-white'
+                                    : 'bg-slate-900/70 border-slate-800 hover:border-slate-600 text-slate-200'
+                                }`}
+                              >
+                                <div className="min-w-0">
+                                  <div className="font-bold text-xs truncate">
+                                    {club.licenceName || club.name}
+                                  </div>
+                                  <div className="text-[11px] text-slate-400 truncate">
+                                    {club.city || 'Łódzkie'}
+                                    {club.teamsCount > 0 ? ` • ${club.teamsCount} drużyn` : ''}
+                                  </div>
+                                </div>
+                                <ChevronRight className="w-4 h-4 text-slate-500 shrink-0" />
+                              </button>
+                            );
+                          })
+                        )}
+                      </div>
+                    )}
+
+                    {/* Club Teams Selector */}
+                    {selectedClub && (
+                      <div className="pt-2 border-t border-slate-800 space-y-2">
+                        <div className="text-[11px] font-bold text-amber-300 flex items-center justify-between gap-2">
+                          <span>Drużyny klubu: {selectedClub.name}</span>
+                          {isLoadingClubTeams && <Loader2 className="w-3.5 h-3.5 animate-spin text-sky-400" />}
+                        </div>
+                        {!isLoadingClubTeams && clubTeams.length > 0 && (
+                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5">
+                            {clubTeams.map((team) => (
+                              <button
+                                key={`${team.leagueId}-${team.seasonId}-${team.teamId}`}
+                                type="button"
+                                disabled={isFetchingLzkoszTeam}
+                                onClick={() => {
+                                  setLzkoszUrl(team.teamUrl);
+                                  handleFetchLzkoszTeam(team.teamUrl);
+                                }}
+                                className="px-3 py-2 rounded-xl bg-slate-900 hover:bg-sky-950/50 border border-slate-700 hover:border-sky-500/50 text-left transition flex items-center justify-between gap-2 disabled:opacity-50"
+                              >
+                                <div className="min-w-0">
+                                  <div className="text-xs font-black text-sky-300 truncate">
+                                    {team.leagueName}
+                                  </div>
+                                  <div className="text-[11px] text-slate-400 truncate">
+                                    {team.teamName}
+                                  </div>
+                                </div>
+                                <Download className="w-3.5 h-3.5 text-sky-400 shrink-0" />
+                              </button>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
+
+              {/* SOURCE B: JSON FILE */}
+              {importSource === 'json' && (
+                <>
+                  {/* File upload drag and drop zone */}
+                  <div
+                    onDragOver={handleDragOver}
+                    onDragLeave={handleDragLeave}
+                    onDrop={handleDrop}
+                    onClick={() => fileInputRef.current?.click()}
+                    className={`p-6 sm:p-8 rounded-2xl border-2 border-dashed text-center cursor-pointer transition select-none ${
+                      isDragOver
+                        ? 'border-emerald-400 bg-emerald-950/30 text-emerald-200'
+                        : 'border-slate-700 bg-slate-950/60 hover:border-slate-500 text-slate-400 hover:text-slate-200'
+                    }`}
+                  >
+                    <input
+                      type="file"
+                      ref={fileInputRef}
+                      onChange={(e) => {
+                        const file = e.target.files?.[0];
+                        if (file) handleFileSelect(file);
+                      }}
+                      accept=".json,application/json"
+                      className="hidden"
+                    />
+                    <FileJson className="w-12 h-12 mx-auto mb-2 text-emerald-400 opacity-80" />
+                    <h4 className="text-sm sm:text-base font-bold text-white mb-1">
+                      Kliknij lub przeciągnij plik kopii zapasowej (.json)
+                    </h4>
+                    <p className="text-xs text-slate-400 max-w-md mx-auto">
+                      Obsługuje pełny eksport drużyny: dane klubu, zdjęcia zawodników w wysokiej rozdzielczości oraz wszystkie protokoły meczowe.
+                    </p>
+                  </div>
+
+                  {/* Direct Paste JSON Textarea Toggle */}
+                  <div className="space-y-1">
+                    <details className="group">
+                      <summary className="text-[11px] font-semibold text-slate-400 hover:text-white cursor-pointer select-none">
+                        ▶ Lub wklej zawartość tekstową JSON ze schowka
+                      </summary>
+                      <div className="pt-2 space-y-2">
+                        <textarea
+                          value={importJsonText}
+                          onChange={(e) => {
+                            const val = e.target.value;
+                            setImportJsonText(val);
+                            if (val.trim()) {
+                              const preview = inspectImportJson(val);
+                              setImportPreview(preview);
+                              if (!preview.valid) setImportErrorMsg(preview.error || 'Błąd formatu');
+                              else setImportErrorMsg(null);
+                            } else {
+                              setImportPreview(null);
+                            }
+                          }}
+                          placeholder="Wklej tutaj kod JSON..."
+                          rows={4}
+                          className="w-full bg-slate-950 border border-slate-800 rounded-xl p-2.5 text-xs text-white font-mono focus:outline-none focus:border-emerald-500"
+                        />
+                      </div>
+                    </details>
+                  </div>
+                </>
+              )}
+
+              {/* Import Preview Card (When file, JSON text, or ŁZKosz team is loaded and valid) */}
               {importPreview && importPreview.valid && (
                 <div className="p-4 rounded-2xl bg-gradient-to-br from-slate-900 to-slate-950 border border-emerald-500/40 space-y-3.5 shadow-xl animate-in fade-in">
                   <div className="flex items-center justify-between flex-wrap gap-2 border-b border-slate-800 pb-2.5">
                     <div className="flex items-center gap-2 text-emerald-400 font-bold text-xs sm:text-sm">
                       <FileCheck className="w-5 h-5 shrink-0" />
-                      <span>Rozpoznano poprawny plik drużyny:</span>
+                      <span>
+                        {importPreview.exportType === 'lzkosz'
+                          ? 'Pobrano skład drużyny z ŁZKosz.pl:'
+                          : 'Rozpoznano poprawny plik drużyny:'}
+                      </span>
                     </div>
-                    {importPreview.exportedAt && (
+                    {importPreview.sourceLabel ? (
+                      <span className="text-[11px] text-sky-300 font-mono">
+                        {importPreview.sourceLabel}
+                      </span>
+                    ) : importPreview.exportedAt ? (
                       <span className="text-[11px] text-slate-400 font-mono">
                         Data eksportu: {new Date(importPreview.exportedAt).toLocaleDateString('pl-PL')}
                       </span>
-                    )}
+                    ) : null}
                   </div>
+
+                  {importPreview.warnings && importPreview.warnings.length > 0 && (
+                    <div className="p-2.5 rounded-xl bg-amber-950/40 border border-amber-500/30 text-amber-200 text-[11px] space-y-1">
+                      {importPreview.warnings.map((w, idx) => (
+                        <div key={idx} className="flex items-start gap-1.5">
+                          <Info className="w-3.5 h-3.5 text-amber-400 shrink-0 mt-0.5" />
+                          <span>{w}</span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
 
                   {/* Club info preview */}
                   {importPreview.clubProfile && (
@@ -683,6 +1068,9 @@ export const TeamExportImportModal: React.FC<TeamExportImportModalProps> = ({
                         </div>
                         <div className="text-[11px] text-slate-400 truncate">
                           {importPreview.clubProfile.city} • Sezon {importPreview.clubProfile.season}
+                          {importPreview.clubProfile.headCoach
+                            ? ` • Trener: ${importPreview.clubProfile.headCoach}`
+                            : ''}
                         </div>
                       </div>
                     </div>
@@ -698,7 +1086,7 @@ export const TeamExportImportModal: React.FC<TeamExportImportModalProps> = ({
                     </div>
 
                     <div className="p-2 rounded-xl bg-slate-950/70 border border-slate-800">
-                      <div className="text-[11px] text-slate-400">Zdjęcia zdjęć</div>
+                      <div className="text-[11px] text-slate-400">Zdjęcia</div>
                       <div className="font-mono font-black text-amber-400 text-base">
                         {importPreview.photosCount}
                       </div>
@@ -798,7 +1186,9 @@ export const TeamExportImportModal: React.FC<TeamExportImportModalProps> = ({
                             Pełne zastąpienie
                           </strong>
                           <span className="text-[11px] text-slate-400">
-                            Zastępuje obecny skład i mecze zawartością wczytanego pliku.
+                            {importPreview.preserveExistingMatchesOnOverwrite
+                              ? 'Zastępuje obecny skład zawodników i dane klubu (zapisane mecze pozostają bez zmian).'
+                              : 'Zastępuje obecny skład i mecze zawartością wczytanego pliku.'}
                           </span>
                         </div>
                       </label>

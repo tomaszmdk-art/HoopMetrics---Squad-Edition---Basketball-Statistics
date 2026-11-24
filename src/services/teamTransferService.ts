@@ -41,8 +41,11 @@ export interface TeamExportPackage {
 export interface ImportPreviewResult {
   valid: boolean;
   error?: string;
-  exportType?: 'team_full' | 'team_category' | 'legacy';
+  exportType?: 'team_full' | 'team_category' | 'legacy' | 'lzkosz';
   exportedAt?: string;
+  sourceLabel?: string;
+  warnings?: string[];
+  preserveExistingMatchesOnOverwrite?: boolean;
   clubProfile?: ClubProfile;
   players: Player[];
   matches: Match[];
@@ -469,6 +472,7 @@ export async function executeTeamImport(
     finalClub = {
       ...currentClub,
       ...preview.clubProfile,
+      id: currentClub.id || preview.clubProfile.id || 'club-main',
       updatedAt: Date.now(),
     };
     await saveClubProfile(finalClub);
@@ -533,13 +537,17 @@ export async function executeTeamImport(
   // 3. Matches
   let finalMatches: Match[] = [];
   if (mode === 'overwrite') {
-    for (const m of currentMatches) {
-      await deleteMatch(m.id);
+    if (preview.preserveExistingMatchesOnOverwrite) {
+      finalMatches = currentMatches;
+    } else {
+      for (const m of currentMatches) {
+        await deleteMatch(m.id);
+      }
+      if (preview.matches.length > 0) {
+        await saveMatchesBulk(preview.matches);
+      }
+      finalMatches = preview.matches;
     }
-    if (preview.matches.length > 0) {
-      await saveMatchesBulk(preview.matches);
-    }
-    finalMatches = preview.matches;
   } else {
     const matchMap = new Map<string, Match>();
     for (const m of currentMatches) {

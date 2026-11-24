@@ -519,10 +519,10 @@ export const RosterManagement: React.FC<RosterManagementProps> = ({
                   ? 'bg-emerald-500/15 hover:bg-emerald-500/25 text-emerald-300 border-emerald-500/40'
                   : 'bg-slate-800 hover:bg-slate-700 text-sky-400 border-sky-500/40'
               }`}
-              title="Wczytaj plik JSON ze składem i zdjęciami od trenera (zapis lokalny na tym urządzeniu)"
+              title="Importuj skład z serwisu ŁZKosz.pl lub wczytaj plik JSON z kopią zapasową"
             >
               <Upload className="w-3.5 h-3.5" />
-              <span>{readOnly ? 'Importuj JSON od trenera' : 'Importuj'}</span>
+              <span>{readOnly ? 'Importuj (ŁZKosz / JSON)' : 'Importuj (ŁZKosz / JSON)'}</span>
             </button>
           )}
 

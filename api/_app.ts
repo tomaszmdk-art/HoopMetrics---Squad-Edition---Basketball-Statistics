@@ -5,6 +5,11 @@ import path from 'path';
 import fs from 'fs';
 import os from 'os';
 import { GoogleGenAI } from '@google/genai';
+import {
+  getLzkoszClubs,
+  getLzkoszClubTeams,
+  previewLzkoszTeam,
+} from './lzkoszService';
 
 dotenv.config();
 
@@ -1184,6 +1189,61 @@ Zwróć TYLKO poprawny JSON (bez markdown) w formacie:
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : 'Błąd synchronizacji';
       res.status(500).json({ error: msg });
+    }
+  });
+
+  // ==========================================
+  // ŁZKosz.pl Roster & Club Import Endpoints
+  // ==========================================
+  app.get('/api/lzkosz/clubs', async (req: Request, res: Response) => {
+    try {
+      const forceRefresh = req.query.refresh === '1';
+      const data = await getLzkoszClubs(forceRefresh);
+      res.setHeader('Cache-Control', 'public, max-age=300');
+      res.json(data);
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Nie udało się pobrać listy klubów ŁZKosz.pl';
+      res.status(502).json({ error: msg });
+    }
+  });
+
+  app.get('/api/lzkosz/club-teams', async (req: Request, res: Response) => {
+    try {
+      const clubId = typeof req.query.clubId === 'string' ? req.query.clubId.trim() : '';
+      if (!/^\d{1,8}$/.test(clubId)) {
+        res.status(400).json({ error: 'Podaj poprawny numer identyfikacyjny klubu ŁZKosz.' });
+        return;
+      }
+      const data = await getLzkoszClubTeams(clubId);
+      res.setHeader('Cache-Control', 'public, max-age=300');
+      res.json(data);
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Nie udało się pobrać drużyn wybranego klubu';
+      res.status(502).json({ error: msg });
+    }
+  });
+
+  app.post('/api/lzkosz/team-preview', async (req: Request, res: Response) => {
+    try {
+      const rawUrl = typeof req.body?.url === 'string' ? req.body.url : '';
+      const includePhotos = req.body?.includePhotos !== false;
+      if (!rawUrl.trim()) {
+        res.status(400).json({ error: 'Wklej link do strony drużyny na lzkosz.pl.' });
+        return;
+      }
+      const data = await previewLzkoszTeam(rawUrl, includePhotos);
+      res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+      res.json(data);
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Nie udało się pobrać danych drużyny z lzkosz.pl';
+      const isValidationError =
+        msg.includes('Podaj adres') ||
+        msg.includes('domeny') ||
+        msg.includes('URL') ||
+        msg.includes('HTTPS') ||
+        msg.includes('port') ||
+        msg.includes('Nieprawidłowy');
+      res.status(isValidationError ? 400 : 502).json({ error: msg });
     }
   });
 
