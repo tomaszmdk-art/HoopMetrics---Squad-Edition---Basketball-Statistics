@@ -5,6 +5,7 @@ import {
   checkRoomExists,
   createRoomOnServer,
   extractRoomFromInput,
+  getStoredCoachToken,
   ServerPersistenceMode,
   ServerSyncData,
   setStoredCoachToken,
@@ -230,13 +231,15 @@ export const RoomLobby: React.FC<RoomLobbyProps> = ({
   const handleOpenRecent = (room: RoomSummary) => {
     playClickSound();
     triggerHaptic(25);
-    onEnterRoom(room.roomId, room.role === 'coach' ? room.coachToken || null : null, false);
+    const token =
+      room.role === 'coach' ? getStoredCoachToken(room.roomId) || room.coachToken || null : null;
+    onEnterRoom(room.roomId, token, false);
   };
 
-  const handleDeleteRecent = (e: React.MouseEvent, roomId: string) => {
+  const handleDeleteRecent = (e: React.MouseEvent, roomId: string, role: RoomSummary['role']) => {
     e.stopPropagation();
     playClickSound();
-    setRecentRooms(removeRecentRoom(roomId));
+    setRecentRooms(removeRecentRoom(roomId, role));
   };
 
   return (
@@ -504,67 +507,79 @@ export const RoomLobby: React.FC<RoomLobbyProps> = ({
                   </span>
                 </div>
 
-                {pastedCoachToken ? (
-                  <div className="space-y-2">
-                    <button
-                      type="button"
-                      onClick={() => handleEnterAsCoachWithToken(pastedCoachToken)}
-                      className="w-full py-3 px-4 rounded-xl bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-400 hover:to-orange-400 text-slate-950 font-black text-xs flex items-center justify-center gap-2 transition active:scale-95"
-                    >
-                      <ShieldCheck className="w-4 h-4" />
-                      <span>Wejdź jako Trener / Statystyk (z linku)</span>
-                    </button>
-                    <button
-                      type="button"
-                      onClick={handleEnterAsSpectator}
-                      className="w-full py-2.5 px-4 rounded-xl bg-slate-900 hover:bg-slate-800 text-slate-300 border border-slate-700 font-bold text-xs flex items-center justify-center gap-2 transition"
-                    >
-                      <Eye className="w-4 h-4 text-emerald-400" />
-                      <span>Wejdź tylko jako Rodzic / Kibic</span>
-                    </button>
-                  </div>
-                ) : (
-                  <div className="space-y-2.5">
-                    <button
-                      type="button"
-                      onClick={handleEnterAsSpectator}
-                      className="w-full py-3 px-4 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-black text-xs flex items-center justify-center gap-2 transition active:scale-95 shadow-lg shadow-emerald-950/40"
-                    >
-                      <Eye className="w-4 h-4" />
-                      <span>Wejdź jako Rodzic / Kibic (Podgląd Live)</span>
-                    </button>
+                {(() => {
+                  const savedCoachToken = getStoredCoachToken(foundRoom.roomId);
+                  const availableCoachToken = pastedCoachToken || savedCoachToken;
+                  if (availableCoachToken) {
+                    return (
+                      <div className="space-y-2">
+                        <button
+                          type="button"
+                          onClick={() => handleEnterAsCoachWithToken(availableCoachToken)}
+                          className="w-full py-3 px-4 rounded-xl bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-400 hover:to-orange-400 text-slate-950 font-black text-xs flex items-center justify-center gap-2 transition active:scale-95"
+                        >
+                          <ShieldCheck className="w-4 h-4" />
+                          <span>
+                            {pastedCoachToken
+                              ? 'Wejdź jako Trener / Statystyk (z linku)'
+                              : 'Wejdź jako Trener / Statystyk (zapisany dostęp)'}
+                          </span>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={handleEnterAsSpectator}
+                          className="w-full py-2.5 px-4 rounded-xl bg-slate-900 hover:bg-slate-800 text-slate-200 border border-emerald-500/40 font-bold text-xs flex items-center justify-center gap-2 transition"
+                        >
+                          <Eye className="w-4 h-4 text-emerald-400" />
+                          <span>Wejdź jako Rodzic / Kibic (Podgląd Live)</span>
+                        </button>
+                      </div>
+                    );
+                  }
 
-                    {!showPinJoin ? (
+                  return (
+                    <div className="space-y-2.5">
                       <button
                         type="button"
-                        onClick={() => setShowPinJoin(true)}
-                        className="w-full py-2 px-3 rounded-xl bg-slate-900 hover:bg-slate-800 text-amber-300 border border-amber-500/30 font-bold text-xs flex items-center justify-center gap-1.5 transition"
+                        onClick={handleEnterAsSpectator}
+                        className="w-full py-3 px-4 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-black text-xs flex items-center justify-center gap-2 transition active:scale-95 shadow-lg shadow-emerald-950/40"
                       >
-                        <Lock className="w-3.5 h-3.5" />
-                        <span>Jesteś trenerem? Odblokuj kodem PIN</span>
+                        <Eye className="w-4 h-4" />
+                        <span>Wejdź jako Rodzic / Kibic (Podgląd Live)</span>
                       </button>
-                    ) : (
-                      <form onSubmit={handleVerifyJoinPin} className="flex gap-2 pt-1">
-                        <input
-                          type="password"
-                          autoFocus
-                          value={joinPin}
-                          onChange={(e) => setJoinPin(e.target.value)}
-                          placeholder="Kod PIN trenera"
-                          className="flex-1 bg-slate-900 border border-amber-500/40 rounded-xl px-3 py-2 text-xs font-mono tracking-widest text-white focus:outline-none focus:border-amber-400"
-                        />
+
+                      {!showPinJoin ? (
                         <button
-                          type="submit"
-                          disabled={isAuthenticatingPin || !joinPin.trim()}
-                          className="px-4 py-2 rounded-xl bg-amber-500 hover:bg-amber-400 disabled:opacity-50 text-slate-950 font-black text-xs flex items-center gap-1 transition shrink-0"
+                          type="button"
+                          onClick={() => setShowPinJoin(true)}
+                          className="w-full py-2 px-3 rounded-xl bg-slate-900 hover:bg-slate-800 text-amber-300 border border-amber-500/30 font-bold text-xs flex items-center justify-center gap-1.5 transition"
                         >
-                          <KeyRound className="w-3.5 h-3.5" />
-                          <span>{isAuthenticatingPin ? '...' : 'Odblokuj'}</span>
+                          <Lock className="w-3.5 h-3.5" />
+                          <span>Jesteś trenerem? Odblokuj kodem PIN</span>
                         </button>
-                      </form>
-                    )}
-                  </div>
-                )}
+                      ) : (
+                        <form onSubmit={handleVerifyJoinPin} className="flex gap-2 pt-1">
+                          <input
+                            type="password"
+                            autoFocus
+                            value={joinPin}
+                            onChange={(e) => setJoinPin(e.target.value)}
+                            placeholder="Kod PIN trenera"
+                            className="flex-1 bg-slate-900 border border-amber-500/40 rounded-xl px-3 py-2 text-xs font-mono tracking-widest text-white focus:outline-none focus:border-amber-400"
+                          />
+                          <button
+                            type="submit"
+                            disabled={isAuthenticatingPin || !joinPin.trim()}
+                            className="px-4 py-2 rounded-xl bg-amber-500 hover:bg-amber-400 disabled:opacity-50 text-slate-950 font-black text-xs flex items-center gap-1 transition shrink-0"
+                          >
+                            <KeyRound className="w-3.5 h-3.5" />
+                            <span>{isAuthenticatingPin ? '...' : 'Odblokuj'}</span>
+                          </button>
+                        </form>
+                      )}
+                    </div>
+                  );
+                })()}
               </div>
             )}
 
@@ -602,16 +617,26 @@ export const RoomLobby: React.FC<RoomLobbyProps> = ({
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
               {recentRooms.map((room) => (
                 <div
-                  key={room.roomId}
+                  key={`${room.roomId}:${room.role}`}
                   onClick={() => handleOpenRecent(room)}
-                  className="p-3.5 rounded-2xl bg-slate-950/80 border border-slate-800 hover:border-amber-500/50 cursor-pointer transition flex items-center justify-between gap-2.5 group"
+                  className={`p-3.5 rounded-2xl bg-slate-950/80 border border-slate-800 cursor-pointer transition flex items-center justify-between gap-2.5 group ${
+                    room.role === 'coach'
+                      ? 'hover:border-amber-500/50'
+                      : 'hover:border-emerald-500/50'
+                  }`}
                 >
                   <div className="flex items-center gap-2.5 min-w-0">
                     <div className="w-10 h-10 rounded-xl bg-slate-900 border border-slate-800 flex items-center justify-center text-xl shrink-0">
                       {room.badgeEmoji || '🏀'}
                     </div>
                     <div className="min-w-0">
-                      <div className="font-bold text-white text-xs sm:text-sm truncate group-hover:text-amber-400 transition">
+                      <div
+                        className={`font-bold text-white text-xs sm:text-sm truncate transition ${
+                          room.role === 'coach'
+                            ? 'group-hover:text-amber-400'
+                            : 'group-hover:text-emerald-400'
+                        }`}
+                      >
                         {room.teamName}
                       </div>
                       <div className="flex items-center gap-1.5 mt-0.5 flex-wrap">
@@ -634,13 +659,19 @@ export const RoomLobby: React.FC<RoomLobbyProps> = ({
                   <div className="flex items-center gap-1 shrink-0">
                     <button
                       type="button"
-                      onClick={(e) => handleDeleteRecent(e, room.roomId)}
+                      onClick={(e) => handleDeleteRecent(e, room.roomId, room.role)}
                       className="p-1.5 rounded-lg text-slate-600 hover:text-rose-400 hover:bg-rose-500/10 transition"
-                      title="Usuń z listy ostatnich"
+                      title="Usuń ten wariant z listy ostatnich"
                     >
                       <Trash2 className="w-3.5 h-3.5" />
                     </button>
-                    <ArrowRight className="w-4 h-4 text-slate-600 group-hover:text-amber-400 transition" />
+                    <ArrowRight
+                      className={`w-4 h-4 text-slate-600 transition ${
+                        room.role === 'coach'
+                          ? 'group-hover:text-amber-400'
+                          : 'group-hover:text-emerald-400'
+                      }`}
+                    />
                   </div>
                 </div>
               ))}

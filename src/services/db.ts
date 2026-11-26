@@ -5,6 +5,7 @@ import {
   ClubProfile,
   Match,
   Player,
+  RoomRole,
   RoomSummary,
   TeamCategory,
 } from '../types/basketball';
@@ -548,17 +549,57 @@ export function getRecentRooms(): RoomSummary[] {
     if (!raw) return [];
     const parsed = JSON.parse(raw);
     if (!Array.isArray(parsed)) return [];
-    return parsed
+    const seen = new Set<string>();
+    const normalized: RoomSummary[] = [];
+    const sorted = parsed
       .filter((r: any): r is RoomSummary => r && typeof r.roomId === 'string' && typeof r.teamName === 'string')
+      .map((r) => ({
+        ...r,
+        role: (r.role === 'coach' ? 'coach' : 'spectator') as RoomRole,
+      }))
       .sort((a, b) => (b.lastVisited || 0) - (a.lastVisited || 0));
+
+    for (const item of sorted) {
+      const key = `${item.roomId}:${item.role}`;
+      if (!seen.has(key)) {
+        seen.add(key);
+        normalized.push(item);
+      }
+    }
+    return normalized;
   } catch {
     return [];
   }
 }
 
 export function saveRecentRoom(summary: RoomSummary): RoomSummary[] {
-  const current = getRecentRooms().filter((r) => r.roomId !== summary.roomId);
-  const updated = [summary, ...current].slice(0, 15);
+  const role: RoomRole = summary.role === 'coach' ? 'coach' : 'spectator';
+  const existingList = getRecentRooms();
+  const existingSameRole = existingList.find((r) => r.roomId === summary.roomId && r.role === role);
+
+  const normalizedEntry: RoomSummary = {
+    ...summary,
+    role,
+    coachToken: role === 'coach' ? summary.coachToken || existingSameRole?.coachToken : undefined,
+  };
+
+  // Preserve both 'coach' and 'spectator' variants for the same roomId; update sibling metadata without altering its role/token/lastVisited
+  const others = existingList
+    .filter((r) => !(r.roomId === summary.roomId && r.role === role))
+    .map((r) =>
+      r.roomId === summary.roomId
+        ? {
+            ...r,
+            teamName: summary.teamName || r.teamName,
+            shortName: summary.shortName || r.shortName,
+            city: summary.city !== undefined ? summary.city : r.city,
+            badgeEmoji: summary.badgeEmoji || r.badgeEmoji,
+            season: summary.season || r.season,
+          }
+        : r
+    );
+
+  const updated = [normalizedEntry, ...others].slice(0, 24);
   if (typeof window !== 'undefined') {
     try {
       localStorage.setItem(RECENT_ROOMS_STORAGE_KEY, JSON.stringify(updated));
@@ -569,8 +610,10 @@ export function saveRecentRoom(summary: RoomSummary): RoomSummary[] {
   return updated;
 }
 
-export function removeRecentRoom(roomId: string): RoomSummary[] {
-  const updated = getRecentRooms().filter((r) => r.roomId !== roomId);
+export function removeRecentRoom(roomId: string, role?: RoomRole): RoomSummary[] {
+  const updated = getRecentRooms().filter((r) =>
+    role ? !(r.roomId === roomId && r.role === role) : r.roomId !== roomId
+  );
   if (typeof window !== 'undefined') {
     try {
       localStorage.setItem(RECENT_ROOMS_STORAGE_KEY, JSON.stringify(updated));

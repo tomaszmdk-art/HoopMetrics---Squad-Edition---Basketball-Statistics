@@ -87,8 +87,32 @@ function buildPlayersFingerprint(list: Player[]): string {
     .join(',')}`;
 }
 
+function isSpectatorModeInUrl(): boolean {
+  if (typeof window === 'undefined') return false;
+  const p = new URLSearchParams(window.location.search);
+  return (
+    p.get('view') === 'spectator' ||
+    p.get('mode') === 'view' ||
+    p.get('role') === 'viewer' ||
+    p.get('podglad') === '1'
+  );
+}
+
 export default function App() {
   const initialUrlRef = useRef(parseRoomFromUrl());
+  const sessionRoleRef = useRef<'coach' | 'spectator' | null>(
+    (() => {
+      const rid = initialUrlRef.current.roomId;
+      if (!rid) return null;
+      if (isSpectatorModeInUrl() && !initialUrlRef.current.coachTokenFromUrl) {
+        return 'spectator';
+      }
+      if (initialUrlRef.current.coachTokenFromUrl || getStoredCoachToken(rid)) {
+        return 'coach';
+      }
+      return 'spectator';
+    })()
+  );
 
   const [roomId, setRoomId] = useState<string | null>(() => {
     const rid = initialUrlRef.current.roomId;
@@ -99,19 +123,18 @@ export default function App() {
   const [coachToken, setCoachToken] = useState<string | null>(() => {
     const rid = initialUrlRef.current.roomId;
     if (!rid) return null;
+    if (isSpectatorModeInUrl() && !initialUrlRef.current.coachTokenFromUrl) {
+      return null;
+    }
     return initialUrlRef.current.coachTokenFromUrl || getStoredCoachToken(rid);
   });
 
   const [isReadOnlyViewer, setIsReadOnlyViewer] = useState<boolean>(() => {
     const rid = initialUrlRef.current.roomId;
     if (!rid) return true;
-    const urlParams = typeof window !== 'undefined' ? new URLSearchParams(window.location.search) : null;
-    const explicitSpectator =
-      urlParams?.get('view') === 'spectator' ||
-      urlParams?.get('mode') === 'view' ||
-      urlParams?.get('role') === 'viewer' ||
-      urlParams?.get('podglad') === '1';
-    if (explicitSpectator) return true;
+    if (isSpectatorModeInUrl() && !initialUrlRef.current.coachTokenFromUrl) {
+      return true;
+    }
     const token = initialUrlRef.current.coachTokenFromUrl || getStoredCoachToken(rid);
     return !token;
   });
@@ -210,9 +233,17 @@ export default function App() {
   };
 
   // Update browser URL cleanly
-  const updateUrlForRoom = (rid: string | null, replace = false) => {
+  const updateUrlForRoom = (
+    rid: string | null,
+    replace = false,
+    viewMode?: 'coach' | 'spectator'
+  ) => {
     if (typeof window === 'undefined') return;
-    const nextUrl = rid ? `/?room=${encodeURIComponent(rid)}` : '/';
+    const nextUrl = rid
+      ? viewMode === 'spectator'
+        ? `/?room=${encodeURIComponent(rid)}&view=spectator`
+        : `/?room=${encodeURIComponent(rid)}`
+      : '/';
     if (replace) {
       window.history.replaceState({}, '', nextUrl);
     } else {
@@ -250,20 +281,23 @@ export default function App() {
       }
 
       if (nextCoachToken) {
+        sessionRoleRef.current = 'coach';
         setStoredCoachToken(normalizedRoomId, nextCoachToken);
         setCoachToken(nextCoachToken);
         setIsReadOnlyViewer(false);
+        updateUrlForRoom(normalizedRoomId, false, 'coach');
       } else {
-        clearStoredCoachToken(normalizedRoomId);
+        // Keep any previously saved coach token intact so user can still switch back to Coach from Lobby
+        sessionRoleRef.current = 'spectator';
         setCoachToken(null);
         setIsReadOnlyViewer(true);
+        updateUrlForRoom(normalizedRoomId, false, 'spectator');
       }
 
       setJustCreatedRoom(justCreated);
       setCurrentTab('home');
       setIsLoading(true);
       setRoomId(normalizedRoomId);
-      updateUrlForRoom(normalizedRoomId, false);
     },
     []
   );
@@ -273,6 +307,7 @@ export default function App() {
     playClickSound();
     triggerHaptic(25);
     pendingCreatedStateRef.current = null;
+    sessionRoleRef.current = null;
     setServerPersistence(null);
     setCurrentRoomId(null);
     setRoomId(null);
@@ -303,6 +338,7 @@ export default function App() {
       syncFingerprintsRef.current = { club: '', players: '', matches: '', activeMatch: '' };
 
       if (!parsed.roomId) {
+        sessionRoleRef.current = null;
         setRoomId(null);
         setCoachToken(null);
         setIsReadOnlyViewer(true);
@@ -314,7 +350,9 @@ export default function App() {
         return;
       }
 
-      const token = parsed.coachTokenFromUrl || getStoredCoachToken(parsed.roomId);
+      const urlSpectator = isSpectatorModeInUrl() && !parsed.coachTokenFromUrl;
+      const token = urlSpectator ? null : parsed.coachTokenFromUrl || getStoredCoachToken(parsed.roomId);
+      sessionRoleRef.current = token ? 'coach' : 'spectator';
       setRoomId(parsed.roomId);
       setCoachToken(token);
       setIsReadOnlyViewer(!token);
@@ -430,22 +468,29 @@ export default function App() {
       setCurrentRoomId(roomId);
 
       try {
-        // Resolve effective coach token (prefer URL token if present in this navigation, then stored)
+        // Resolve effective coach token (prefer URL token if present in this navigation, then stored unless explicitly opened as spectator)
         const parsed = parseRoomFromUrl();
-        let effectiveToken =
-          parsed.roomId === roomId && parsed.coachTokenFromUrl
+        const hasCoachParamInUrl = parsed.roomId === roomId && Boolean(parsed.coachTokenFromUrl);
+        const explicitSpectator =
+          !hasCoachParamInUrl &&
+          (isSpectatorModeInUrl() || sessionRoleRef.current === 'spectator');
+
+        let effectiveToken = explicitSpectator
+          ? null
+          : hasCoachParamInUrl
             ? parsed.coachTokenFromUrl
             : coachToken || getStoredCoachToken(roomId);
 
-        if (parsed.roomId === roomId && parsed.coachTokenFromUrl) {
+        if (hasCoachParamInUrl && parsed.coachTokenFromUrl) {
           const authCheck = await authenticateRoomCoach(roomId!, {
             coachToken: parsed.coachTokenFromUrl,
           });
           if (authCheck.authenticated && authCheck.coachToken) {
             effectiveToken = authCheck.coachToken;
+            sessionRoleRef.current = 'coach';
             setStoredCoachToken(roomId!, effectiveToken);
             // Strip &coach= from browser address bar so copying URL shares the safe parent link
-            updateUrlForRoom(roomId!, true);
+            updateUrlForRoom(roomId!, true, 'coach');
           } else {
             effectiveToken = null;
             clearStoredCoachToken(roomId);
@@ -508,18 +553,6 @@ export default function App() {
             serverData.lastUpdated
           );
         }
-        const explicitSpectator =
-          typeof window !== 'undefined' &&
-          (() => {
-            const p = new URLSearchParams(window.location.search);
-            return (
-              p.get('view') === 'spectator' ||
-              p.get('mode') === 'view' ||
-              p.get('role') === 'viewer' ||
-              p.get('podglad') === '1'
-            );
-          })();
-
         const serverConfirmedCoach = serverData
           ? Boolean(serverData.isCoachAuthenticated)
           : Boolean(effectiveToken);
@@ -533,6 +566,7 @@ export default function App() {
         }
 
         if (!cancelled) {
+          sessionRoleRef.current = isCoachActive ? 'coach' : 'spectator';
           setCoachToken(isCoachActive ? effectiveToken : null);
           setIsReadOnlyViewer(!isCoachActive);
         }
@@ -1265,13 +1299,13 @@ export default function App() {
     });
   };
 
-  // Lock coach controls and switch to Parent / Spectator read-only mode
+  // Lock coach controls and switch to Parent / Spectator read-only mode (preserving stored coach access)
   const handleLockOrSwitchToSpectator = () => {
     playClickSound();
     triggerHaptic(30);
+    sessionRoleRef.current = 'spectator';
     if (roomId) {
-      clearStoredCoachToken(roomId);
-      updateUrlForRoom(roomId, true);
+      updateUrlForRoom(roomId, true, 'spectator');
       saveRecentRoom({
         roomId,
         teamName: clubProfile.name || 'Drużyna Koszykarska',
@@ -1786,11 +1820,12 @@ export default function App() {
             return { ok: false, error: res.error || 'Nieprawidłowy kod PIN trenera dla tego pokoju.' };
           }
           const validToken = res.coachToken;
+          sessionRoleRef.current = 'coach';
           setStoredCoachToken(roomId, validToken);
           setCoachToken(validToken);
           setIsReadOnlyViewer(false);
           setIsCoachPinOpen(false);
-          updateUrlForRoom(roomId, true);
+          updateUrlForRoom(roomId, true, 'coach');
 
           saveRecentRoom({
             roomId,
