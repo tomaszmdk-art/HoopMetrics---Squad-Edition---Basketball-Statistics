@@ -33,6 +33,7 @@ import { playClickSound, triggerHaptic } from '../services/tts';
 import { getPlayerFullName, hasAnyPersonalData } from '../services/playerDisplay';
 import { useLanguage } from '../i18n/LanguageContext';
 import { ResumeMatchConfirmModal } from './ResumeMatchConfirmModal';
+import { useBackHandler } from '../services/navigationHistory';
 
 interface MatchHistoryProps {
   matches: Match[];
@@ -190,6 +191,15 @@ export const MatchHistory: React.FC<MatchHistoryProps> = ({
 
   // Match deletion state
   const [matchToDelete, setMatchToDelete] = useState<{ id: string; opponent: string; score: string } | null>(null);
+
+  useBackHandler(Boolean(viewingMatch), () => setViewingMatch(null), 'history-boxscore');
+  useBackHandler(Boolean(viewingPlayByPlay), () => setViewingPlayByPlay(null), 'history-pbp');
+  useBackHandler(Boolean(matchToDelete), () => setMatchToDelete(null), 'history-delete');
+  useBackHandler(
+    Boolean(matchToResumeConfirm),
+    () => setMatchToResumeConfirm(null),
+    'history-resume'
+  );
 
   const handleDeleteClick = (e: React.MouseEvent, id: string, opp: string, score: string) => {
     e.stopPropagation();

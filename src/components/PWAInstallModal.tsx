@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { Download, Smartphone, CheckCircle, Share, PlusSquare, X } from 'lucide-react';
 import { usePWAInstall } from '../hooks/usePWAInstall';
+import { useBackHandler } from '../services/navigationHistory';
 
 export const PWAInstallModal: React.FC<{ isOpen: boolean; onClose: () => void }> = ({
   isOpen,
@@ -8,6 +9,8 @@ export const PWAInstallModal: React.FC<{ isOpen: boolean; onClose: () => void }>
 }) => {
   const { isInstallable, isInstalled, isIOS, install } = usePWAInstall();
   const [installing, setInstalling] = useState(false);
+
+  useBackHandler(isOpen, onClose, 'pwa-install');
 
   if (!isOpen) return null;
 

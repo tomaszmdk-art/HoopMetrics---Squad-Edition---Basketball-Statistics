@@ -21,6 +21,7 @@ import {
   getPlayerShortName,
 } from '../services/playerDisplay';
 import { applyMatchLineupChange } from '../services/playingTime';
+import { useBackHandler } from '../services/navigationHistory';
 
 const formatNumAndName = (p: Player): string => {
   const n = p.lastName?.trim() || p.firstName?.trim();
@@ -73,6 +74,7 @@ export const PlayerSelector: React.FC<PlayerSelectorProps> = ({
   liveTheme,
 }) => {
   const [isSubModalOpen, setIsSubModalOpen] = useState(false);
+  useBackHandler(isSubModalOpen, () => setIsSubModalOpen(false), 'selector-sub');
   const [subCourtPlayerId, setSubCourtPlayerId] = useState<string | null>(null);
   const [subBenchPlayerId, setSubBenchPlayerId] = useState<string | null>(null);
   const [subMode, setSubMode] = useState<'rotation' | 'lineup'>('rotation');

@@ -53,6 +53,7 @@ import {
 } from 'lucide-react';
 import { playClickSound, triggerHaptic } from '../services/tts';
 import { useLanguage } from '../i18n/LanguageContext';
+import { useBackHandler } from '../services/navigationHistory';
 
 interface ParentViewProps {
   onBackToHome?: () => void;
@@ -88,6 +89,27 @@ export const ParentView: React.FC<ParentViewProps> = ({ onBackToHome, soundEnabl
   const [matchToDelete, setMatchToDelete] = useState<ChildMatchRecord | null>(null);
   const [childToDelete, setChildToDelete] = useState<ChildProfile | null>(null);
   const [isFinishModalOpen, setIsFinishModalOpen] = useState(false);
+
+  useBackHandler(
+    isChildModalOpen,
+    () => {
+      setIsChildModalOpen(false);
+      setChildToEdit(null);
+    },
+    'parent-child'
+  );
+  useBackHandler(
+    isNewMatchOpen && Boolean(children.find((c) => c.id === selectedChildId)),
+    () => setIsNewMatchOpen(false),
+    'parent-new-match'
+  );
+  useBackHandler(Boolean(matchToDelete), () => setMatchToDelete(null), 'parent-del-match');
+  useBackHandler(Boolean(childToDelete), () => setChildToDelete(null), 'parent-del-child');
+  useBackHandler(
+    isFinishModalOpen && Boolean(activeMatch),
+    () => setIsFinishModalOpen(false),
+    'parent-finish'
+  );
   const [finishOurScore, setFinishOurScore] = useState('');
   const [finishOppScore, setFinishOppScore] = useState('');
   const [finishNotes, setFinishNotes] = useState('');

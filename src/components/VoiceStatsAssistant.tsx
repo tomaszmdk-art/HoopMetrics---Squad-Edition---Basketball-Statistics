@@ -22,6 +22,7 @@ import {
   ParsedVoiceAction,
 } from '../services/voiceRecognitionService';
 import { playClickSound, playScoreSound, triggerHaptic, announcePlay } from '../services/tts';
+import { useBackHandler } from '../services/navigationHistory';
 
 // Polyfill SpeechRecognition type for browser
 type IWindow = typeof window & {
@@ -56,6 +57,7 @@ export const VoiceStatsAssistant: React.FC<VoiceStatsAssistantProps> = ({
   const [statusMessage, setStatusMessage] = useState<string>('Dotknij mikrofonu, aby dyktować statystyki');
   const [isExpanded, setIsExpanded] = useState(false);
   const [showHelpModal, setShowHelpModal] = useState(false);
+  useBackHandler(showHelpModal, () => setShowHelpModal(false), 'voice-help');
   const [manualText, setManualText] = useState('');
   const [isProcessing, setIsProcessing] = useState(false);
   const [hasMicPermissionError, setHasMicPermissionError] = useState(false);

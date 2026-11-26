@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useLayoutEffect, useRef, useCallback } from 'react';
 import { AppSettings, ClubProfile, Match, Player } from './types/basketball';
 
 import { Navbar } from './components/Navbar';
@@ -69,6 +69,22 @@ import {
   AlertTriangle,
 } from 'lucide-react';
 import { playClickSound, triggerHaptic } from './services/tts';
+import {
+  AppTab,
+  buildRoomUrl,
+  initNavigationHistory,
+  pushPageHistory,
+  replacePageHistory,
+  subscribeToPagePopState,
+  useBackHandler,
+} from './services/navigationHistory';
+
+const VALID_TABS: ReadonlySet<string> = new Set(['home', 'live', 'roster', 'history', 'parent']);
+function parseTabFromUrl(): AppTab | null {
+  if (typeof window === 'undefined') return null;
+  const tabParam = new URLSearchParams(window.location.search).get('tab');
+  return tabParam && VALID_TABS.has(tabParam) ? (tabParam as AppTab) : null;
+}
 
 function buildActiveMatchFingerprint(m: Match | undefined): string {
   if (!m) return 'none';
@@ -139,23 +155,30 @@ export default function App() {
     return !token;
   });
 
-  const [lobbyParentMode, setLobbyParentMode] = useState(false);
+  const [lobbyParentMode, setLobbyParentMode] = useState<boolean>(() => {
+    if (typeof window === 'undefined' || initialUrlRef.current.roomId) return false;
+    return new URLSearchParams(window.location.search).get('parent') === '1';
+  });
   const [roomLoadError, setRoomLoadError] = useState<string | null>(null);
   const [justCreatedRoom, setJustCreatedRoom] = useState(false);
   const [wsStatus, setWsStatus] = useState<WsConnectionStatus>('disconnected');
 
-  const [currentTab, setCurrentTab] = useState<'home' | 'live' | 'roster' | 'history' | 'parent'>(() => {
+  const [currentTab, setCurrentTab] = useState<AppTab>(() => {
     if (typeof window !== 'undefined') {
-      const urlParams = new URLSearchParams(window.location.search);
-      const tabParam = urlParams.get('tab');
-      const viewParam = urlParams.get('view');
-      const modeParam = urlParams.get('mode');
-      if (tabParam === 'live' || viewParam === 'spectator' || modeParam === 'view' || urlParams.get('podglad') === '1') {
+      const urlTab = parseTabFromUrl();
+      if (urlTab) return urlTab;
+      if (isSpectatorModeInUrl()) {
         return 'live';
       }
     }
     return 'home';
   });
+  const roomIdRef = useRef<string | null>(roomId);
+  const currentTabRef = useRef<AppTab>(currentTab);
+  const isReadOnlyViewerRef = useRef<boolean>(isReadOnlyViewer);
+  roomIdRef.current = roomId;
+  currentTabRef.current = currentTab;
+  isReadOnlyViewerRef.current = isReadOnlyViewer;
 
   const [players, setPlayers] = useState<Player[]>([]);
   const playersRef = useRef<Player[]>([]);
@@ -232,24 +255,92 @@ export default function App() {
     setIsTeamExportImportOpen(true);
   };
 
-  // Update browser URL cleanly
-  const updateUrlForRoom = (
-    rid: string | null,
-    replace = false,
-    viewMode?: 'coach' | 'spectator'
-  ) => {
-    if (typeof window === 'undefined') return;
-    const nextUrl = rid
-      ? viewMode === 'spectator'
-        ? `/?room=${encodeURIComponent(rid)}&view=spectator`
-        : `/?room=${encodeURIComponent(rid)}`
-      : '/';
-    if (replace) {
-      window.history.replaceState({}, '', nextUrl);
-    } else {
-      window.history.pushState({}, '', nextUrl);
+  useBackHandler(
+    !isReadOnlyViewer && Boolean(activeMatch) && isFinishModalOpen,
+    () => setIsFinishModalOpen(false),
+    'finish-match'
+  );
+  useBackHandler(!isReadOnlyViewer && isNewMatchOpen, () => setIsNewMatchOpen(false), 'new-match');
+  useBackHandler(!isReadOnlyViewer && isSettingsOpen, () => setIsSettingsOpen(false), 'settings');
+  useBackHandler(
+    !isReadOnlyViewer && isClubProfileOpen,
+    () => setIsClubProfileOpen(false),
+    'club-profile'
+  );
+  useBackHandler(isLegalModalOpen, () => setIsLegalModalOpen(false), 'legal');
+  useBackHandler(isShareModalOpen, () => setIsShareModalOpen(false), 'share');
+  useBackHandler(isCoachPinOpen, () => setIsCoachPinOpen(false), 'coach-pin');
+  useBackHandler(
+    isTeamExportImportOpen,
+    () => setIsTeamExportImportOpen(false),
+    'team-export-import'
+  );
+  useBackHandler(isTransferModalOpen, () => setIsTransferModalOpen(false), 'transfer');
+  useBackHandler(isLiveCustomizerOpen, () => setIsLiveCustomizerOpen(false), 'live-customizer');
+
+  // Update browser URL cleanly via unified navigationHistory
+  const updateUrlForRoom = useCallback(
+    (
+      rid: string | null,
+      replace = false,
+      viewMode: 'coach' | 'spectator' = 'coach',
+      tab: AppTab = 'home'
+    ) => {
+      if (typeof window === 'undefined') return;
+      const nav = rid
+        ? {
+            bsKind: 'room' as const,
+            bsRoomId: rid,
+            bsViewMode: viewMode,
+            bsTab: tab,
+          }
+        : { bsKind: 'lobby' as const };
+      const nextUrl = rid ? buildRoomUrl(rid, viewMode, tab) : '/';
+      if (replace) {
+        replacePageHistory(nav, nextUrl);
+      } else {
+        pushPageHistory(nav, nextUrl);
+      }
+    },
+    []
+  );
+
+  // Navigate between tabs inside a room while recording history for mobile Back button
+  const navigateToTab = useCallback((nextTab: AppTab) => {
+    if (currentTabRef.current === nextTab) return;
+    currentTabRef.current = nextTab;
+    setCurrentTab(nextTab);
+    const activeRid = roomIdRef.current;
+    if (activeRid) {
+      const viewMode =
+        sessionRoleRef.current === 'spectator' || isReadOnlyViewerRef.current
+          ? 'spectator'
+          : 'coach';
+      pushPageHistory(
+        {
+          bsKind: 'room',
+          bsRoomId: activeRid,
+          bsViewMode: viewMode,
+          bsTab: nextTab,
+        },
+        buildRoomUrl(activeRid, viewMode, nextTab)
+      );
     }
-  };
+  }, []);
+
+  const handleOpenLobbyParentMode = useCallback(() => {
+    setLobbyParentMode(true);
+    pushPageHistory({ bsKind: 'lobby-parent' }, '/?parent=1');
+  }, []);
+
+  const handleCloseLobbyParentMode = useCallback(() => {
+    if (typeof window !== 'undefined' && window.history.state?.bsKind === 'lobby-parent') {
+      window.history.back();
+      return;
+    }
+    setLobbyParentMode(false);
+    replacePageHistory({ bsKind: 'lobby' }, '/');
+  }, []);
 
   // Enter a specific room from RoomLobby or deep-link
   const handleEnterRoom = useCallback(
@@ -280,26 +371,28 @@ export default function App() {
         }
       }
 
+      currentTabRef.current = 'home';
+      setCurrentTab('home');
+
       if (nextCoachToken) {
         sessionRoleRef.current = 'coach';
         setStoredCoachToken(normalizedRoomId, nextCoachToken);
         setCoachToken(nextCoachToken);
         setIsReadOnlyViewer(false);
-        updateUrlForRoom(normalizedRoomId, false, 'coach');
+        updateUrlForRoom(normalizedRoomId, false, 'coach', 'home');
       } else {
         // Keep any previously saved coach token intact so user can still switch back to Coach from Lobby
         sessionRoleRef.current = 'spectator';
         setCoachToken(null);
         setIsReadOnlyViewer(true);
-        updateUrlForRoom(normalizedRoomId, false, 'spectator');
+        updateUrlForRoom(normalizedRoomId, false, 'spectator', 'home');
       }
 
       setJustCreatedRoom(justCreated);
-      setCurrentTab('home');
       setIsLoading(true);
       setRoomId(normalizedRoomId);
     },
-    []
+    [updateUrlForRoom]
   );
 
   // Return to Room Lobby
@@ -327,40 +420,76 @@ export default function App() {
     lastServerUpdatedRef.current = 0;
     syncFingerprintsRef.current = { club: '', players: '', matches: '', activeMatch: '' };
     updateUrlForRoom(null, false);
-  }, []);
+  }, [updateUrlForRoom]);
 
-  // Listen to browser Back/Forward navigation
-  useEffect(() => {
-    const handlePopState = () => {
+  // Initialize base history state and listen to Back/Forward navigation
+  useLayoutEffect(() => {
+    const initialRid = roomIdRef.current;
+    if (initialRid) {
+      initNavigationHistory({
+        bsKind: 'room',
+        bsRoomId: initialRid,
+        bsViewMode: isReadOnlyViewerRef.current ? 'spectator' : 'coach',
+        bsTab: currentTabRef.current,
+      });
+    } else if (typeof window !== 'undefined' && new URLSearchParams(window.location.search).get('parent') === '1') {
+      initNavigationHistory({ bsKind: 'lobby-parent' });
+    } else {
+      initNavigationHistory({ bsKind: 'lobby' });
+    }
+
+    return subscribeToPagePopState((incomingState) => {
       const parsed = parseRoomFromUrl();
-      setCurrentRoomId(parsed.roomId);
-      lastServerUpdatedRef.current = 0;
-      syncFingerprintsRef.current = { club: '', players: '', matches: '', activeMatch: '' };
 
       if (!parsed.roomId) {
-        sessionRoleRef.current = null;
-        setRoomId(null);
-        setCoachToken(null);
-        setIsReadOnlyViewer(true);
-        setActiveMatch(undefined);
-        activeMatchRef.current = undefined;
-        setPlayers([]);
-        setMatches([]);
-        setIsLoading(false);
+        const wantsParent =
+          incomingState?.bsKind === 'lobby-parent' ||
+          (typeof window !== 'undefined' &&
+            new URLSearchParams(window.location.search).get('parent') === '1');
+        setLobbyParentMode(wantsParent);
+
+        if (roomIdRef.current !== null) {
+          sessionRoleRef.current = null;
+          setCurrentRoomId(null);
+          lastServerUpdatedRef.current = 0;
+          syncFingerprintsRef.current = { club: '', players: '', matches: '', activeMatch: '' };
+          setRoomId(null);
+          setCoachToken(null);
+          setIsReadOnlyViewer(true);
+          setActiveMatch(undefined);
+          activeMatchRef.current = undefined;
+          setPlayers([]);
+          setMatches([]);
+          setIsLoading(false);
+        }
         return;
       }
 
+      setLobbyParentMode(false);
       const urlSpectator = isSpectatorModeInUrl() && !parsed.coachTokenFromUrl;
       const token = urlSpectator ? null : parsed.coachTokenFromUrl || getStoredCoachToken(parsed.roomId);
-      sessionRoleRef.current = token ? 'coach' : 'spectator';
+      const targetRole: 'coach' | 'spectator' = token ? 'coach' : 'spectator';
+      const targetTab: AppTab =
+        parseTabFromUrl() || incomingState?.bsTab || (urlSpectator ? 'live' : 'home');
+
+      if (parsed.roomId === roomIdRef.current && sessionRoleRef.current === targetRole) {
+        // Same room and role: switch tab instantaneously without full room reload
+        currentTabRef.current = targetTab;
+        setCurrentTab(targetTab);
+        return;
+      }
+
+      setCurrentRoomId(parsed.roomId);
+      lastServerUpdatedRef.current = 0;
+      syncFingerprintsRef.current = { club: '', players: '', matches: '', activeMatch: '' };
+      sessionRoleRef.current = targetRole;
+      currentTabRef.current = targetTab;
+      setCurrentTab(targetTab);
       setRoomId(parsed.roomId);
       setCoachToken(token);
       setIsReadOnlyViewer(!token);
       setIsLoading(true);
-    };
-
-    window.addEventListener('popstate', handlePopState);
-    return () => window.removeEventListener('popstate', handlePopState);
+    });
   }, []);
 
   // Helper: Apply incoming room state (from WebSocket or REST poll)
@@ -490,7 +619,7 @@ export default function App() {
             sessionRoleRef.current = 'coach';
             setStoredCoachToken(roomId!, effectiveToken);
             // Strip &coach= from browser address bar so copying URL shares the safe parent link
-            updateUrlForRoom(roomId!, true, 'coach');
+            updateUrlForRoom(roomId!, true, 'coach', currentTabRef.current);
           } else {
             effectiveToken = null;
             clearStoredCoachToken(roomId);
@@ -727,8 +856,10 @@ export default function App() {
         if (finalActiveMatch) {
           setActiveMatch(finalActiveMatch);
           activeMatchRef.current = finalActiveMatch;
-          if (!isCoachActive) {
+          if (!isCoachActive && !parseTabFromUrl()) {
+            currentTabRef.current = 'live';
             setCurrentTab('live');
+            updateUrlForRoom(roomId!, true, 'spectator', 'live');
           }
         } else {
           setActiveMatch(undefined);
@@ -953,7 +1084,7 @@ export default function App() {
       clubProfile,
       deletedMatchIds: getLocalDeletedMatchIds(roomId),
     });
-    setCurrentTab('history');
+    navigateToTab('history');
   };
 
   // Start new match
@@ -973,7 +1104,7 @@ export default function App() {
       activeMatchId: newMatch.id,
       clubProfile,
     });
-    setCurrentTab('live');
+    navigateToTab('live');
   };
 
   // Resume a match
@@ -998,7 +1129,7 @@ export default function App() {
       activeMatchId: liveVersion.id,
       clubProfile,
     });
-    setCurrentTab('live');
+    navigateToTab('live');
   };
 
   // Delete match
@@ -1305,7 +1436,7 @@ export default function App() {
     triggerHaptic(30);
     sessionRoleRef.current = 'spectator';
     if (roomId) {
-      updateUrlForRoom(roomId, true, 'spectator');
+      updateUrlForRoom(roomId, true, 'spectator', currentTabRef.current);
       saveRecentRoom({
         roomId,
         teamName: clubProfile.name || 'Drużyna Koszykarska',
@@ -1327,7 +1458,7 @@ export default function App() {
       <div className="min-h-screen w-full bg-slate-950 text-slate-100 p-3 sm:p-6">
         <div className="max-w-7xl mx-auto">
           <ParentView
-            onBackToHome={() => setLobbyParentMode(false)}
+            onBackToHome={handleCloseLobbyParentMode}
             soundEnabled={settings.ttsEnabled}
           />
         </div>
@@ -1342,7 +1473,7 @@ export default function App() {
       <>
         <RoomLobby
           onEnterRoom={handleEnterRoom}
-          onOpenParentMode={() => setLobbyParentMode(true)}
+          onOpenParentMode={handleOpenLobbyParentMode}
           initialError={roomLoadError}
         />
         <OfflineIndicator />
@@ -1378,7 +1509,7 @@ export default function App() {
       {/* Top Navigation */}
       <Navbar
         currentTab={currentTab}
-        onSelectTab={setCurrentTab}
+        onSelectTab={navigateToTab}
         activeMatch={activeMatch}
         clubProfile={clubProfile}
         roomId={roomId}
@@ -1435,10 +1566,10 @@ export default function App() {
             onOpenLegalModal={() => setIsLegalModalOpen(true)}
             onOpenNewMatch={!isReadOnlyViewer ? () => setIsNewMatchOpen(true) : undefined}
             onResumeMatch={!isReadOnlyViewer ? handleResumeMatch : undefined}
-            onGoToLive={() => setCurrentTab('live')}
-            onGoToRoster={() => setCurrentTab('roster')}
-            onGoToHistory={() => setCurrentTab('history')}
-            onGoToParent={() => setCurrentTab('parent')}
+            onGoToLive={() => navigateToTab('live')}
+            onGoToRoster={() => navigateToTab('roster')}
+            onGoToHistory={() => navigateToTab('history')}
+            onGoToParent={() => navigateToTab('parent')}
             readOnly={isReadOnlyViewer}
             onOpenShareModal={() => {
               setJustCreatedRoom(false);
@@ -1514,7 +1645,7 @@ export default function App() {
 
                 <div className="w-full mt-6 grid grid-cols-2 gap-2.5">
                   <button
-                    onClick={() => setCurrentTab('roster')}
+                    onClick={() => navigateToTab('roster')}
                     className="py-3 px-4 rounded-xl bg-slate-900 hover:bg-slate-800 border border-slate-800 text-slate-200 text-xs font-bold transition flex items-center justify-center gap-1.5 shadow-md"
                   >
                     <Users className="w-4 h-4 text-amber-400" />
@@ -1522,7 +1653,7 @@ export default function App() {
                   </button>
 
                   <button
-                    onClick={() => setCurrentTab('history')}
+                    onClick={() => navigateToTab('history')}
                     className="py-3 px-4 rounded-xl bg-slate-900 hover:bg-slate-800 border border-slate-800 text-slate-200 text-xs font-bold transition flex items-center justify-center gap-1.5 shadow-md"
                   >
                     <Trophy className="w-4 h-4 text-amber-400" />
@@ -1546,7 +1677,7 @@ export default function App() {
                         </div>
                       </div>
                       <button
-                        onClick={() => setCurrentTab('history')}
+                        onClick={() => navigateToTab('history')}
                         className="py-2 px-3 rounded-xl bg-amber-500/20 hover:bg-amber-500/30 border border-amber-500/40 text-amber-300 text-xs font-bold transition flex items-center gap-1 shrink-0"
                       >
                         <span>Protokół</span>
@@ -1565,7 +1696,7 @@ export default function App() {
                       {matches.slice(0, 3).map((m) => (
                         <div
                           key={m.id}
-                          onClick={() => setCurrentTab('history')}
+                          onClick={() => navigateToTab('history')}
                           className="p-3 rounded-xl bg-slate-900 border border-slate-800 hover:border-slate-700 flex items-center justify-between cursor-pointer transition"
                         >
                           <div>
@@ -1614,7 +1745,7 @@ export default function App() {
 
                   <div className="grid grid-cols-2 gap-2">
                     <button
-                      onClick={() => setCurrentTab('roster')}
+                      onClick={() => navigateToTab('roster')}
                       className="py-3 px-4 rounded-xl bg-slate-900 hover:bg-slate-800 border border-slate-800 text-slate-200 text-xs font-bold transition flex items-center justify-center gap-1.5"
                     >
                       <Users className="w-4 h-4 text-amber-400" />
@@ -1622,7 +1753,7 @@ export default function App() {
                     </button>
 
                     <button
-                      onClick={() => setCurrentTab('history')}
+                      onClick={() => navigateToTab('history')}
                       className="py-3 px-4 rounded-xl bg-slate-900 hover:bg-slate-800 border border-slate-800 text-slate-200 text-xs font-bold transition flex items-center justify-center gap-1.5"
                     >
                       <Trophy className="w-4 h-4 text-amber-400" />
@@ -1691,8 +1822,8 @@ export default function App() {
               onResumeMatch={!isReadOnlyViewer ? handleResumeMatch : undefined}
               onDeleteMatch={!isReadOnlyViewer ? handleDeleteMatch : undefined}
               readOnly={isReadOnlyViewer}
-              onGoToLive={() => setCurrentTab('live')}
-              onGoToRoster={() => setCurrentTab('roster')}
+              onGoToLive={() => navigateToTab('live')}
+              onGoToRoster={() => navigateToTab('roster')}
               onOpenTransferModal={() => setIsTransferModalOpen(true)}
               onOpenTeamExport={!isReadOnlyViewer ? () => handleOpenTeamExportImport('export') : undefined}
             />
@@ -1703,7 +1834,7 @@ export default function App() {
         {currentTab === 'parent' && (
           <div className="flex-1 p-3 sm:p-6 max-w-7xl mx-auto w-full">
             <ParentView
-              onBackToHome={() => setCurrentTab('home')}
+              onBackToHome={() => navigateToTab('home')}
               soundEnabled={settings.ttsEnabled}
             />
           </div>
@@ -1825,7 +1956,7 @@ export default function App() {
           setCoachToken(validToken);
           setIsReadOnlyViewer(false);
           setIsCoachPinOpen(false);
-          updateUrlForRoom(roomId, true, 'coach');
+          updateUrlForRoom(roomId, true, 'coach', currentTabRef.current);
 
           saveRecentRoom({
             roomId,

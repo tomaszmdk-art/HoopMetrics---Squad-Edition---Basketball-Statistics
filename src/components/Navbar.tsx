@@ -3,6 +3,7 @@ import { TeamCategory, Match, ClubProfile } from '../types/basketball';
 import { PWAInstallButton } from './PWAInstallModal';
 import { LanguageSwitcher } from './LanguageSwitcher';
 import { useLanguage } from '../i18n/LanguageContext';
+import { useBackHandler } from '../services/navigationHistory';
 import {
   Users,
   History,
@@ -71,6 +72,7 @@ export const Navbar: React.FC<NavbarProps> = ({
 }) => {
   const { t } = useLanguage();
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
+  useBackHandler(isMobileMenuOpen, () => setIsMobileMenuOpen(false), 'mobile-menu');
 
   const clubName = clubProfile?.name || 'MÓJ KLUB KOSZYKARSKI';
   const season = clubProfile?.season || '26/27';

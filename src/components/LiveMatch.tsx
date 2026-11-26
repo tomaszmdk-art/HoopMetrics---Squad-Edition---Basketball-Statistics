@@ -9,6 +9,7 @@ import { PlayByPlayModal } from './PlayByPlayModal';
 import { calculatePlayerStats, getEventPoints, recalculateMatchScores } from '../services/statsCalculator';
 import { applyMatchLineupChange } from '../services/playingTime';
 import { announcePlay, triggerHaptic, playClickSound, playScoreSound } from '../services/tts';
+import { useBackHandler } from '../services/navigationHistory';
 import { BarChart3, ListOrdered, CheckCircle2, Sparkles, FileText, UserCheck } from 'lucide-react';
 import { VoiceStatsAssistant } from './VoiceStatsAssistant';
 import { ParsedVoiceAction } from '../services/voiceRecognitionService';
@@ -79,6 +80,10 @@ export const LiveMatch: React.FC<LiveMatchProps> = ({
   const [isSubModalOpen, setIsSubModalOpen] = useState(false);
   const [showBoxScore, setShowBoxScore] = useState(false);
   const [showPlayByPlay, setShowPlayByPlay] = useState(false);
+
+  useBackHandler(isSubModalOpen, () => setIsSubModalOpen(false), 'live-sub');
+  useBackHandler(showBoxScore, () => setShowBoxScore(false), 'live-boxscore');
+  useBackHandler(showPlayByPlay, () => setShowPlayByPlay(false), 'live-pbp');
   const [spectatorTab, setSpectatorTab] = useState<'plays' | 'boxscore' | 'player-tracker'>('plays');
   const [trackedPlayerId, setTrackedPlayerId] = useState<string | null>(null);
 

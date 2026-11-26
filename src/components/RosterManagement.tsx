@@ -31,6 +31,7 @@ import {
   hasPersonalData,
 } from '../services/playerDisplay';
 import { useLanguage } from '../i18n/LanguageContext';
+import { useBackHandler } from '../services/navigationHistory';
 
 interface RosterManagementProps {
   players: Player[];
@@ -393,6 +394,15 @@ export const RosterManagement: React.FC<RosterManagementProps> = ({
     name: string;
     isServerSynced: boolean;
   } | null>(null);
+
+  useBackHandler(isModalOpen, () => setIsModalOpen(false), 'roster-player-form');
+  useBackHandler(isBulkModalOpen, () => setIsBulkModalOpen(false), 'roster-bulk-form');
+  useBackHandler(Boolean(playerToDelete), () => setPlayerToDelete(null), 'roster-delete');
+  useBackHandler(
+    Boolean(selectedProfilePlayer),
+    () => setSelectedProfilePlayer(null),
+    'roster-profile'
+  );
 
   const handleDeleteClick = (player: Player) => {
     playClickSound();

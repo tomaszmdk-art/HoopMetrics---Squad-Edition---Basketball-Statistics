@@ -38,6 +38,7 @@ import { PlayByPlayModal } from './PlayByPlayModal';
 import { ResumeMatchConfirmModal } from './ResumeMatchConfirmModal';
 import { exportMatchPdf } from '../services/exportPdf';
 import { getPlayerFullName, resolveEventPlayerLabel } from '../services/playerDisplay';
+import { useBackHandler } from '../services/navigationHistory';
 
 interface HomePageProps {
   activeCategory?: TeamCategory;
@@ -85,6 +86,14 @@ export const HomePage: React.FC<HomePageProps> = ({
   const [viewingMatch, setViewingMatch] = useState<Match | null>(null);
   const [viewingPlayByPlay, setViewingPlayByPlay] = useState<Match | null>(null);
   const [matchToResumeConfirm, setMatchToResumeConfirm] = useState<Match | null>(null);
+
+  useBackHandler(Boolean(viewingMatch), () => setViewingMatch(null), 'home-boxscore');
+  useBackHandler(Boolean(viewingPlayByPlay), () => setViewingPlayByPlay(null), 'home-pbp');
+  useBackHandler(
+    Boolean(matchToResumeConfirm),
+    () => setMatchToResumeConfirm(null),
+    'home-resume'
+  );
   const [selectedSeason, setSelectedSeason] = useState<string>('all');
   const [includePersonalData, setIncludePersonalData] = useState<boolean>(false);
 
